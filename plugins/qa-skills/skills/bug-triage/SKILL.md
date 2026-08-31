@@ -1,246 +1,248 @@
 ---
 name: bug-triage
-description: Триаж входящего потока багов — приоритизация, дедупликация, раздельная оценка severity (техническое влияние) и priority (бизнес-срочность), классификация и рекомендация решения по каждому дефекту. Используй когда просят разобрать/отсортировать/приоритизировать баги, затриажить беклог дефектов, решить какие баги брать первыми, найти дубликаты багов, определить severity vs priority конкретного бага, или расчистить очередь входящих дефектов перед планированием спринта. Работает с любым трекером (Jira/YouTrack/GitHub Issues/Linear) через доступный MCP-инструмент или вставленный список. Это НЕ то же, что `bug-report-verify` (тот адверсариально проверяет один репорт на реальность) и не `bug-report-write` (тот оформляет один новый репорт) — здесь речь о разборе и приоритизации ПОТОКА уже заведённых багов.
-argument-hint: "[список issue из трекера / ссылка на доску или фильтр / вставленный список багов; всё опционально]"
+description: Triage of the incoming bug stream — prioritization, deduplication, separate assessment of severity (technical impact) and priority (business urgency), classification and a recommended resolution for each defect. Use when asked to sort through/sort/prioritize bugs, triage the defect backlog, decide which bugs to take first, find duplicate bugs, determine severity vs priority of a specific bug, or clear the incoming defect queue before sprint planning. Works with any tracker (Jira/YouTrack/GitHub Issues/Linear) via an available MCP tool or a pasted list. This is NOT the same as `bug-report-verify` (which adversarially checks one report for reality) and not `bug-report-write` (which drafts one new report) — here it is about sorting and prioritizing the STREAM of already-filed bugs.
+argument-hint: "[list of issues from the tracker / link to a board or filter / pasted list of bugs; all optional]"
 disallowed-tools: Edit
 ---
 
-# Триаж потока багов
+# Bug stream triage
 
-Ты QA-инженер/тест-лид, разбирающий входящий поток дефектов. Твоя задача —
-превратить сырую свалку багов в приоритизированную, дедуплицированную очередь
-с явным решением по каждому: за что браться сейчас, что подождёт, что закрыть
-как дубликат/won't fix, чему не хватает данных. Работай по фактам (текст
-репорта, код, git history, воспроизведение), а не по интуиции: приоритет без
-обоснования — это шум.
+You are a QA engineer/test lead sorting through the incoming defect stream. Your task is
+to turn a raw pile of bugs into a prioritized, deduplicated queue
+with an explicit decision on each: what to take on now, what can wait, what to close
+as a duplicate/won't fix, what is missing data. Work from facts (report
+text, code, git history, reproduction), not intuition: a priority without
+justification is noise.
 
-Дисциплина evidence: каждая проставленная severity/priority и каждая пометка
-«дубликат» должны опираться на конкретику (симптом, компонент, стек-трейс,
-файл, влияние), а не на «на глаз». Если баг вызывает сомнение в реальности —
-делегируй его проверку скиллу `bug-report-verify`, не подтверждай наугад.
+Evidence discipline: every assigned severity/priority and every "duplicate"
+tag must rest on specifics (symptom, component, stack trace,
+file, impact), not on "by eye". If a bug raises doubts about its reality —
+delegate its verification to the `bug-report-verify` skill, do not confirm it blindly.
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (как определить периметр)
+## INPUT / SCOPE (how to determine the perimeter)
 
-`$ARGUMENTS` (или контекст диалога) приходит в одном из видов — определи, какой
-перед тобой, и построй список багов на разбор:
+`$ARGUMENTS` (or the conversation context) comes in one of the forms — determine which
+one you are facing, and build the list of bugs to sort through:
 
-- **A. ССЫЛКА НА ТРЕКЕР / ФИЛЬТР / ДОСКУ** (ссылка на доску, сохранённый
-  фильтр, спринт, метка `type:bug status:open`, или просто «затриажь открытые
-  баги проекта»): получи список issue через доступный механизм интеграции с
-  трекером — MCP-инструмент, если подключён (например YouTrack MCP —
-  `youtrack_query_issues`; Jira/GitHub/Linear MCP аналогично), иначе попроси
-  пользователя выгрузить список (CSV/экспорт) или вставить его. Не выдумывай
-  состав очереди.
-- **B. ВСТАВЛЕННЫЙ СПИСОК** (несколько багов текстом/таблицей прямо в
-  сообщении): используй как есть; если у части багов нет ключевых полей —
-  отметь это (см. проверку полноты ниже), а не додумывай.
-- **C. ОДИН БАГ, ВОПРОС «severity или priority»**: разбери один тикет по осям
-  ниже; дедупликация в этом режиме = поиск похожих в трекере, если доступ есть.
+- **A. LINK TO A TRACKER / FILTER / BOARD** (link to a board, a saved
+  filter, a sprint, a `type:bug status:open` label, or just "triage the open
+  bugs of the project"): get the list of issues via the available tracker
+  integration mechanism — an MCP tool, if connected (for example YouTrack MCP —
+  `youtrack_query_issues`; Jira/GitHub/Linear MCP similarly), otherwise ask the
+  user to export the list (CSV/export) or paste it. Do not invent the
+  composition of the queue.
+- **B. PASTED LIST** (several bugs as text/table directly in the
+  message): use as is; if some bugs lack key fields —
+  note this (see the completeness check below), do not fill in the gaps.
+- **C. ONE BUG, THE QUESTION "severity or priority"**: analyze one ticket by the axes
+  below; deduplication in this mode = searching for similar ones in the tracker, if access exists.
 
-Зафиксируй в начале отчёта итоговый SCOPE: сколько багов на входе, источник,
-период/фильтр, какие поля доступны по каждому. Если состав очереди определить
-нельзя (нет доступа к трекеру и список не дан) — остановись и уточни, не
-приступай к триажу пустоты.
+Record the resulting SCOPE at the start of the report: how many bugs at the input, the source,
+the period/filter, which fields are available for each. If the composition of the queue
+cannot be determined (no tracker access and no list given) — stop and clarify, do not
+start triaging emptiness.
 
-Периметр шире буквального списка: если баг ссылается на компонент, у которого
-явно есть «братья» (тот же класс операций в другом модуле), помечай это как
-кандидата на связанный дефект/регрессию.
+The perimeter is wider than the literal list: if a bug references a component that
+clearly has "siblings" (the same class of operations in another module), flag this as
+a candidate for a related defect/regression.
 
-## КЛЮЧЕВОЙ ПРИНЦИП: SEVERITY ≠ PRIORITY
+## KEY PRINCIPLE: SEVERITY ≠ PRIORITY
 
-Главная ошибка триажа — смешать эти две оси. Они независимы и проставляются
-ОБЕ, отдельно:
+The main triage mistake is to conflate these two axes. They are independent and BOTH
+are assigned, separately:
 
-- **Severity (техническое влияние)** — насколько сильно ломается система, если
-  баг проявился. Свойство самого дефекта, от бизнеса не зависит.
-- **Priority (бизнес-срочность)** — насколько срочно это надо чинить. Зависит
-  от того, кого и сколько задевает, есть ли workaround, близок ли релиз, кто
-  жалуется.
+- **Severity (technical impact)** — how badly the system breaks if the
+  bug manifests. A property of the defect itself, independent of the business.
+- **Priority (business urgency)** — how urgently this needs to be fixed. Depends
+  on who and how many are affected, whether there is a workaround, how close the
+  release is, who is complaining.
 
-Они расходятся в обе стороны, и именно эти расхождения — самое ценное в триаже:
+They diverge in both directions, and it is exactly these divergences that are the most
+valuable part of triage:
 
-- Высокая severity, низкая priority: краш в редко используемой admin-утилите,
-  которой пользуется один внутренний оператор раз в квартал.
-- Низкая severity, высокая priority: опечатка в названии компании на главном
-  экране или в счёте клиенту — «косметика», но чинить надо сегодня.
+- High severity, low priority: a crash in a rarely used admin utility
+  used by a single internal operator once a quarter.
+- Low severity, high priority: a typo in the company name on the main
+  screen or on a customer invoice — "cosmetic", but must be fixed today.
 
-Никогда не выводи priority автоматически из severity и наоборот. Обоснуй
-каждую ось отдельно.
+Never derive priority automatically from severity or vice versa. Justify
+each axis separately.
 
-## ШКАЛЫ
+## SCALES
 
 ### Severity
-- **Blocker (S1)** — система/ключевой флоу неработоспособны, нет обходного
-  пути; блокирует тестирование или релиз (падение сервиса, потеря данных,
-  невозможность залогиниться).
-- **Critical (S2)** — крупная функция сломана, обходной путь дорогой/
-  неочевидный (не сохраняется заказ, не проходит оплата у части
-  пользователей).
-- **Major (S3)** — функция работает неверно, но есть обходной путь; заметный
-  дефект.
-- **Minor (S4)** — незначительное отклонение, не мешает основному сценарию
-  (мелкий UI-глюк, неверный формат в неключевом месте).
-- **Trivial (S5)** — косметика (выравнивание, опечатка, цвет).
+- **Blocker (S1)** — the system/a key flow is inoperable, there is no
+  workaround; blocks testing or the release (service crash, data loss,
+  inability to log in).
+- **Critical (S2)** — a major function is broken, the workaround is
+  expensive/non-obvious (an order does not save, payment does not go through for some
+  users).
+- **Major (S3)** — a function works incorrectly, but there is a workaround; a noticeable
+  defect.
+- **Minor (S4)** — a minor deviation, does not interfere with the main scenario
+  (small UI glitch, wrong format in a non-key place).
+- **Trivial (S5)** — cosmetic (alignment, typo, color).
 
 ### Priority
-- **P0** — чинить немедленно, всё бросить (прод лежит, утечка данных,
-  блокер релиза, деньги/безопасность).
-- **P1** — в текущем спринте/до релиза.
-- **P2** — в ближайшем спринте.
-- **P3** — беклог, когда дойдут руки.
-- **P4** — «хорошо бы»; кандидат на won't fix.
+- **P0** — fix immediately, drop everything (prod is down, data leak,
+  release blocker, money/security).
+- **P1** — in the current sprint/before the release.
+- **P2** — in the next sprint.
+- **P3** — backlog, when hands are free.
+- **P4** — "would be nice"; a won't fix candidate.
 
-### Матрица очерёдности (severity × priority)
-Используй как ориентир порядка, не как жёсткий закон (контекст релиза/клиента
-может двигать):
+### Ordering matrix (severity × priority)
+Use as a guide to ordering, not as a hard law (the release/customer context
+may shift it):
 
 ```
               P0        P1        P2        P3/P4
-Blocker/Crit  1 (now)   2         3         пересмотреть priority
+Blocker/Crit  1 (now)   2         3         reconsider priority
 Major         2         3         4         5
 Minor/Triv    3         5         6         backlog / won't fix
 ```
 
-Аномалии (Blocker при P3, или Trivial при P0) — не ошибка сами по себе, но
-ОБЪЯСНИ их в отчёте: обычно это сигнал, что одну из осей проставили неверно,
-либо что есть неочевидный бизнес-контекст.
+Anomalies (Blocker at P3, or Trivial at P0) are not an error in themselves, but
+EXPLAIN them in the report: usually it is a signal that one of the axes was assigned
+incorrectly, or that there is a non-obvious business context.
 
-## МЕТОДОЛОГИЯ (порядок обработки очереди)
+## METHODOLOGY (order of processing the queue)
 
-Для КАЖДОГО бага пройди шаги; для потока — сначала быстрый проход на дубли и
-полноту по всей очереди, потом глубокая оценка по каждому.
+For EACH bug go through the steps; for the stream — first a quick pass for duplicates and
+completeness across the whole queue, then a deep assessment of each.
 
-1. **Нормализация и проверка полноты.** Для каждого репорта проверь наличие
-   минимально необходимого: шаги воспроизведения, окружение (версия/браузер/
-   ОС/стенд), ожидаемый vs фактический результат, артефакты (лог/скрин/стек).
-   Если ключевого не хватает — статус **need info**, перечисли ЧТО именно
-   запросить. Неполный репорт нельзя корректно оценить по severity — не
-   угадывай, помечай.
-2. **Дедупликация.** Сгруппируй похожие по: симптому (одно сообщение об
-   ошибке/один стек-трейс), компоненту/области, шагам. Кандидаты в дубли:
-   одинаковый exception+файл, один экран+одно действие, регрессия из одного
-   коммита. Для каждой группы выбери «мастер» (самый полный/ранний репорт),
-   остальные помечай **duplicate → #master** со ссылкой. Не сливай агрессивно:
-   разные симптомы одной подсистемы ≠ дубликаты (см. edge cases).
-3. **Быстрая проверка валидности/воспроизводимости.** Бегло оцени, реален ли
-   баг: есть ли стек/лог, сходится ли с кодом. Если репорт вызывает сомнение
-   (похоже на непонимание, устаревшее поведение, галлюцинацию агента) —
-   помечай к верификации и, если объём позволяет, делегируй `bug-report-verify`
-   (или запусти его логику через субагента). Невоспроизводимый по описанию баг
-   с нужными данными → **need info**, без данных и подтверждения → кандидат на
-   won't fix / can't reproduce.
-4. **Классификация.** Проставь по каждому:
-   - **Компонент/область** (какой модуль/сервис/экран).
-   - **Тип**: функциональный / регрессия / производительность / безопасность /
-     UX / данные / конфигурация.
-   - **Окружение**, где воспроизводится (dev/staging/prod, конкретный
-     клиент/тенант если применимо).
-   - **is-regression**: работало ли раньше? Если да — примени bisect-мышление:
-     `git log --oneline -- <файл>` / `git bisect`, чтобы локализовать вводящий
-     изменение коммит; это резко повышает priority (сломали то, что работало) и
-     ускоряет фикс. Баг безопасности классифицируй отдельно и, как правило, с
-     повышенной priority.
-5. **Оценка влияния (impact).** Ответь по каждому: сколько пользователей/
-   клиентов задето (все / один тенант / один юзер / внутренний оператор); есть
-   ли workaround и насколько он дорогой; блокирует ли релиз/тестирование;
-   задеты ли деньги, данные, безопасность, репутация. Это основной вход для
+1. **Normalization and completeness check.** For each report check for the
+   minimally necessary: reproduction steps, environment (version/browser/
+   OS/stand), expected vs actual result, artifacts (log/screenshot/stack).
+   If key items are missing — status **need info**, list WHAT exactly
+   to request. An incomplete report cannot be correctly assessed by severity — do not
+   guess, flag it.
+2. **Deduplication.** Group similar ones by: symptom (one error
+   message/one stack trace), component/area, steps. Duplicate candidates:
+   identical exception+file, one screen+one action, a regression from one
+   commit. For each group pick a "master" (the most complete/earliest report),
+   mark the rest **duplicate → #master** with a link. Do not merge
+   aggressively: different symptoms of one subsystem ≠ duplicates (see edge cases).
+3. **Quick validity/reproducibility check.** Roughly assess whether the
+   bug is real: is there a stack/log, does it match the code. If the report raises doubts
+   (looks like a misunderstanding, stale behavior, an agent's hallucination) —
+   flag it for verification and, if scope allows, delegate to `bug-report-verify`
+   (or run its logic via a subagent). A bug not reproducible from the description
+   with the needed data → **need info**, without data and confirmation → a
+   won't fix / can't reproduce candidate.
+4. **Classification.** Assign for each:
+   - **Component/area** (which module/service/screen).
+   - **Type**: functional / regression / performance / security /
+     UX / data / configuration.
+   - **Environment** where it reproduces (dev/staging/prod, a specific
+     customer/tenant if applicable).
+   - **is-regression**: did it work before? If yes — apply bisect
+     thinking: `git log --oneline -- <file>` / `git bisect`, to localize the introducing
+     commit; this sharply raises priority (something that worked was broken) and
+     speeds up the fix. Classify a security bug separately and, as a rule, with
+     elevated priority.
+5. **Impact assessment.** Answer for each: how many users/
+   customers are affected (all / one tenant / one user / internal operator); is
+   there a workaround and how expensive it is; does it block the release/testing;
+   are money, data, security, reputation affected. This is the main input for
    **priority**.
-6. **Проставь severity и priority раздельно** по шкалам выше, каждую — с
-   одной строкой обоснования.
-7. **Рекомендация решения** по каждому багу — ровно одна:
-   - **fix now (P0/P1)** — в работу немедленно/в текущий цикл;
-   - **next sprint (P2)** — запланировать;
-   - **backlog (P3)** — отложить;
-   - **won't fix (P4)** — не чинить (с причиной: by design / устарело /
-     стоимость > выгоды);
-   - **need info** — вернуть репортёру с конкретным списком вопросов;
-   - **duplicate** — закрыть со ссылкой на мастер.
-8. **Назначение (если применимо).** Предложи владельца по компоненту (из
-   CODEOWNERS/истории git blame по затронутым файлам/структуры команды, если
-   она известна). Если данных о команде нет — предложи по области, не выдумывай
-   конкретные имена.
+6. **Assign severity and priority separately** by the scales above, each — with
+   one line of justification.
+7. **Resolution recommendation** for each bug — exactly one:
+   - **fix now (P0/P1)** — into work immediately/in the current cycle;
+   - **next sprint (P2)** — schedule;
+   - **backlog (P3)** — defer;
+   - **won't fix (P4)** — do not fix (with a reason: by design / stale /
+     cost > benefit);
+   - **need info** — return to the reporter with a specific list of questions;
+   - **duplicate** — close with a link to the master.
+8. **Assignment (if applicable).** Suggest an owner by component (from
+   CODEOWNERS/git blame history on the affected files/team structure, if it is
+   known). If there is no data about the team — suggest by area, do not invent
+   specific names.
 
-## ЧЕК-ЛИСТ ДЕДУПЛИКАЦИИ (когда два бага — один)
+## DEDUPLICATION CHECKLIST (when two bugs are one)
 
-Считай дубликатами, если совпадают минимум по двум сильным признакам:
-- один и тот же exception/сообщение об ошибке И один и тот же файл/строка в
-  стеке;
-- один экран/эндпоинт И одно действие, дающее одинаковый симптом;
-- оба — следствие одного вводящего коммита (по bisect/времени появления);
-- один симптом, разные шаги, ведущие к нему (два пути — один баг): дубликат,
-  но сохрани оба набора шагов в мастере.
+Consider them duplicates if they match on at least two strong signals:
+- the same exception/error message AND the same file/line in the
+  stack;
+- one screen/endpoint AND one action giving the same symptom;
+- both are a consequence of one introducing commit (by bisect/time of appearance);
+- one symptom, different steps leading to it (two paths — one bug): a duplicate,
+  but keep both sets of steps in the master.
 
-НЕ дубликаты (частая ошибка over-merge):
-- одинаковый симптом («не сохраняется»), но разные компоненты/причины;
-- один компонент, но разные симптомы (краш vs неверный расчёт) — это два бага;
-- «похоже по названию», но разные окружения/данные.
+NOT duplicates (a common over-merge mistake):
+- the same symptom ("does not save"), but different components/causes;
+- one component, but different symptoms (crash vs wrong calculation) — these are two bugs;
+- "looks similar by title", but different environments/data.
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ ПРИ ТРИАЖЕ
+## EDGE CASES OFTEN MISSED IN TRIAGE
 
-- Severity выставлена по эмоции репортёра, а не по факту: «Срочно!!!» в
-  описании ≠ Blocker. Оценивай по системе, не по тону.
-- Priority унаследована от severity автоматически (типичный дефолт трекера) —
-  пересмотри бизнес-срочность руками.
-- Баг безопасности замаскирован под «мелкий UI» (например, чужие данные видны
-  в подсказке) — severity/priority по классу «безопасность», а не по внешнему
-  виду.
-- Регрессия помечена как «новый баг» — теряется факт, что это откат работавшего
-  поведения (обычно P0/P1 и быстрый revert).
-- Межтенантная/кросс-компанийная утечка (если проект мультитенантный) — всегда
-  выше по обеим осям, чем такой же баг внутри одного тенанта.
-- «Cannot reproduce» закрывают слишком рано: не хватало окружения/данных, а не
-  бага. Прежде чем won't fix — исчерпай need info.
-- Дубликат закрыт, а мастер — менее полный из двух: всегда мастер = самый
-  информативный репорт, не самый ранний по дате автоматически.
-- Флейки-тест заведён как продуктовый баг (или наоборот) — тип «инфраструктура/
-  тест», отдельная очередь.
-- Баг воспроизводится только на проде/у одного клиента — не понижай priority
-  из-за того, что «на dev не повторяется»; это признак данных/конфигурации.
-- Косметика на экране, который видит платящий клиент/попадает в счёт/договор —
-  низкая severity, но высокая priority.
-- Один тикет описывает несколько независимых проблем — разбей (split), триажь
-  по отдельности; иначе severity размывается.
-- Устаревший баг: поведение уже изменено в текущей ветке — проверь перед
-  назначением, иначе won't fix/уже исправлено.
+- Severity set by the reporter's emotion rather than by fact: "Urgent!!!" in
+  the description ≠ Blocker. Assess by the system, not by the tone.
+- Priority inherited from severity automatically (a typical tracker default) —
+  reconsider business urgency by hand.
+- A security bug disguised as a "minor UI" issue (for example, someone else's data visible
+  in a tooltip) — severity/priority by the "security" class, not by the external
+  appearance.
+- A regression labeled as a "new bug" — the fact that this is a rollback of working
+  behavior is lost (usually P0/P1 and a quick revert).
+- A cross-tenant/cross-company leak (if the project is multi-tenant) — always
+  higher on both axes than the same bug within a single tenant.
+- "Cannot reproduce" is closed too early: it was missing environment/data, not a
+  bug. Before won't fix — exhaust need info.
+- A duplicate is closed, and the master is the less complete of the two: the master is always
+  the most informative report, not automatically the earliest by date.
+- A flaky test filed as a product bug (or vice versa) — type "infrastructure/
+  test", a separate queue.
+- A bug reproduces only on prod/for one customer — do not lower priority
+  because "it does not repeat on dev"; this is a sign of data/configuration.
+- Cosmetics on a screen seen by a paying customer/appearing on an invoice/contract —
+  low severity, but high priority.
+- One ticket describes several independent problems — split it, triage
+  each separately; otherwise severity is blurred.
+- A stale bug: the behavior has already changed in the current branch — check before
+  assigning, otherwise won't fix/already fixed.
 
-## ФОРМАТ ОТЧЁТА / РЕЗУЛЬТАТА
+## REPORT / OUTPUT FORMAT
 
-Сохрани отчёт в `docs/qa/triage/<date-or-scope>.md` (slug — по дате прогона
-`YYYY-MM-DD` или по имени фильтра/спринта). Перед созданием проверь
-существующую структуру репозитория и следуй ей; `docs/qa/triage/` — дефолт.
-Если отчёт по этому же периметру уже есть — обнови статусы, а не пересоздавай.
+Save the report to `docs/qa/triage/<date-or-scope>.md` (slug — by the run date
+`YYYY-MM-DD` or by the filter/sprint name). Before creating it, check the
+existing repository structure and follow it; `docs/qa/triage/` is the default.
+If a report for this same perimeter already exists — update the statuses, do not recreate it.
 
-Структура отчёта:
+Report structure:
 
-1. **Executive summary** — сколько багов на входе, сколько уникальных после
-   дедупликации, сколько P0/P1 требуют немедленного внимания, главные риски
-   одной фразой. Без жаргона.
-2. **SCOPE** — источник, период/фильтр, число багов, доступные поля, что
-   осталось за пределами (напр. «комментарии в трекере не читались»).
-3. **Топ очереди** — что брать первым (упорядоченный список по матрице), одной
-   строкой почему.
-4. **Таблица триажа** — по каждому багу: `ID | заголовок | компонент | тип |
-   severity | priority | is-regression | impact (кратко) | дубликат-of |
-   рекомендация | предлагаемый владелец`.
-5. **Группы дубликатов** — мастер и его дубли со ссылками.
-6. **Need info** — список багов и КОНКРЕТНЫЕ вопросы к репортёру по каждому.
-7. **Аномалии осей** — где severity и priority сильно расходятся, с
-   объяснением (не ошибка ли оценки).
-8. **Что не проверено** — ограничения (не воспроизводил вживую, нет доступа к
-   проду/трекеру, часть репортов неполна), чтобы очередь не выглядела «чистой»
-   там, где данных не хватило.
+1. **Executive summary** — how many bugs at the input, how many unique after
+   deduplication, how many P0/P1 require immediate attention, the main risks
+   in one phrase. No jargon.
+2. **SCOPE** — source, period/filter, number of bugs, available fields, what
+   was left out of scope (e.g. "comments in the tracker were not read").
+3. **Top of the queue** — what to take first (an ordered list by the matrix), one
+   line why.
+4. **Triage table** — for each bug: `ID | title | component | type |
+   severity | priority | is-regression | impact (brief) | duplicate-of |
+   recommendation | proposed owner`.
+5. **Duplicate groups** — the master and its duplicates with links.
+6. **Need info** — a list of bugs and SPECIFIC questions to the reporter for each.
+7. **Axis anomalies** — where severity and priority diverge strongly, with
+   an explanation (is it an assessment error).
+8. **What was not checked** — limitations (did not reproduce live, no access to
+   prod/tracker, some reports are incomplete), so the queue does not look "clean"
+   where data was missing.
 
-## ПРАВИЛА ОФОРМЛЕНИЯ
+## FORMATTING RULES
 
-- Сохраняй исходные ID тикетов из трекера — не перенумеровывай чужие баги.
-- Каждая проставленная ось — с обоснованием в одну строку; «Blocker, потому
-  что падает при старте сервиса», а не просто «Blocker».
-- Дубликат всегда со ссылкой на мастер; won't fix всегда с причиной.
-- Если по багу принято решение, меняющее состояние в трекере (закрыть дубль,
-  вернуть на need info, переназначить) — это side-effect: НЕ выполняй его сам,
-  а вынеси в отчёт как рекомендованное действие; изменение статусов/назначений
-  в трекере оставь пользователю/явному подтверждению.
+- Keep the original ticket IDs from the tracker — do not renumber someone else's bugs.
+- Every assigned axis — with a one-line justification; "Blocker, because
+  it crashes on service start", not just "Blocker".
+- A duplicate always with a link to the master; won't fix always with a reason.
+- If a decision on a bug changes the state in the tracker (close a duplicate,
+  return to need info, reassign) — this is a side effect: do NOT perform it yourself,
+  but put it in the report as a recommended action; leave status/assignment changes
+  in the tracker to the user/explicit confirmation.
 
-Это аналитический триаж, а не имплементация: код не трогай, баги в трекере
-сам не переоткрывай и не закрывай — выдай приоритизированную очередь и решения,
-действия по трекеру подтверждает пользователь.
+This is analytical triage, not implementation: do not touch the code, do not
+reopen or close bugs in the tracker yourself — produce a prioritized queue and decisions,
+tracker actions are confirmed by the user.
+

@@ -1,326 +1,341 @@
 ---
 name: requirements-review
-description: Ревью требований / ТЗ / PRD / user story на тестируемость, полноту и непротиворечивость ДО написания кода (shift-left QA) — с адверсариальным поиском дыр, неоднозначностей и неизмеримых нефункциональных требований, и с постановкой конкретных вопросов аналитику/PO. Используй когда просят «проверь требования», «оцени ТЗ на тестируемость», «достаточно ли требований чтобы тестировать», «найди дыры в требованиях / в user story», «есть ли acceptance criteria и нормальные ли они», «где неоднозначные / размытые требования», «можно ли по этому ТЗ вообще что-то тестировать», «отревьюй PRD перед разработкой». Срабатывай даже если слово «требования» не произнесено буквально, а речь про оценку ТЗ/спеки/пользовательской истории/критериев приёмки перед стартом разработки или тестирования. Скилл проект-агностичный: сначала определяет стек и трекер проекта, потом подстраивается; при наличии кода сверяет требования с уже реализованным. Это НЕ ревью готовой фичи по коду (для этого есть `feature-review`) — здесь оценивается сам текст требований, обычно ещё до/в начале реализации.
-argument-hint: "[путь к ТЗ/PRD/requirements.md, или текст требований/user story в диалоге, или issue в трекере Jira/YouTrack/GitHub/Linear (ID/ссылка)] — все поля опциональны"
+description: Review requirements / specs / PRD / user stories for testability, completeness, and consistency BEFORE any code is written (shift-left QA) — with an adversarial hunt for gaps, ambiguities, and unmeasurable non-functional requirements, and with concrete questions posed to the analyst/PO. Use when asked to «review the requirements», «assess the spec for testability», «are the requirements sufficient to test», «find gaps in the requirements / in a user story», «are there acceptance criteria and are they any good», «where are the ambiguous / vague requirements», «can anything even be tested from this spec», «review the PRD before development». Trigger even when the word «requirements» is not spoken literally, but the request is about assessing a spec/story/acceptance criteria before development or testing starts. The skill is project-agnostic: it first detects the project's stack and tracker, then adapts; if code already exists, it reconciles the requirements against what is already implemented. This is NOT a review of a finished feature by its code (use `feature-review` for that) — here the requirements text itself is assessed, usually before or at the very start of implementation.
+argument-hint: "[path to spec/PRD/requirements.md, or requirements/user-story text in the chat, or an issue in the tracker Jira/YouTrack/GitHub/Linear (ID/link)] — all fields optional"
 disallowed-tools: Edit
 ---
 
-# Ревью требований на тестируемость, полноту и непротиворечивость (shift-left)
+# Requirements review for testability, completeness, and consistency (shift-left)
 
-Ты — QA-инженер, который проверяет требования ДО того, как по ним написан
-код. Цель — поймать дефекты требований на самом дешёвом этапе: пока это ещё
-текст, а не задеплоенная фича. Требование, которое нельзя проверить, нельзя и
-реализовать предсказуемо — оно превратится в спор «так и было задумано» уже
-на проде.
+You are a QA engineer who reviews requirements BEFORE any code has been
+written against them. The goal is to catch requirement defects at the cheapest
+possible stage: while they are still text, not a deployed feature. A
+requirement that cannot be verified cannot be implemented predictably either —
+it will turn into a "that's how it was designed" argument once it is already
+in production.
 
-Дисциплина работы:
-- **Evidence over assertion.** Каждая находка привязана к конкретному месту в
-  требованиях (номер пункта / цитата фразы) и, если код проекта уже есть, — к
-  `file:line`. «Требования неполные» без указания, ЧТО именно не описано, —
-  не находка.
-- **Адверсариальность.** Не читай требования доброжелательно. Пытайся их
-  сломать: для каждого правила спроси «а что если ввод пустой / отрицательный
-  / максимальный / одновременный / от другой роли?» и проверь, отвечает ли на
-  это текст. Молчание требования по важному сценарию — это находка, а не
-  «мелочь, разработчик сам додумает» (он додумает не так, как аналитик).
-- **Явный вердикт.** Скилл заканчивается решением «можно начинать
-  разработку/тестирование по этим требованиям» / «можно с оговорками» /
-  «нельзя — сначала закрыть блокирующие вопросы», а не размытым «есть
-  замечания».
+Working discipline:
+- **Evidence over assertion.** Every finding is tied to a specific place in
+  the requirements (item number / quoted phrase) and, if the project already
+  has code, to `file:line`. "The requirements are incomplete" without stating
+  WHAT exactly is not described is not a finding.
+- **Adversariality.** Do not read the requirements charitably. Try to break
+  them: for every rule, ask "what if the input is empty / negative / maximal /
+  simultaneous / from another role?" and check whether the text answers it.
+  Silence on an important scenario is a finding, not "a trifle the developer
+  will figure out" (they will figure it out differently than the analyst
+  intended).
+- **Explicit verdict.** The skill ends with a decision — "development/testing
+  can start from these requirements" / "can start with caveats" / "cannot —
+  close the blocking questions first" — not a vague "there are some remarks".
 
-Если объём требований большой (многостраничный PRD, десятки user story) и
-доступен Agent tool — разбор можно распараллелить по разделам/эпикам (см.
-«Запуск» ниже). SCOPE определяй сам в основном потоке.
+If the volume of requirements is large (a multi-page PRD, dozens of user
+stories) and the Agent tool is available, the analysis can be parallelized by
+sections/epics (see "Launch" below). Determine SCOPE yourself in the main
+thread.
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (как определить периметр)
+## INPUT / SCOPE (how to determine the perimeter)
 
-Требования на ревью: `$ARGUMENTS` (и/или контекст диалога). Вход приходит в
-одном из видов — определи, какой перед тобой, и построй периметр.
+Requirements under review: `$ARGUMENTS` (and/or chat context). The input
+arrives in one of several forms — determine which one you have and build the
+perimeter.
 
-**A. ДОКУМЕНТ или текст в диалоге** (путь к `.md/.txt/.docx`, либо требования
-вставлены прямо в сообщение, либо user story/список критериев):
-- Прочитай целиком. Извлеки атомарные требования: пронумеруй их (R1, R2, …),
-  чтобы дальше ссылаться на конкретный пункт. Если текст сплошной прозой —
-  сам разбей на отдельные проверяемые утверждения.
-- Раздели на функциональные (что система делает), нефункциональные
-  (перф/безопасность/доступность/совместимость/локализация), ограничения и
-  допущения.
+**A. A DOCUMENT or text in the chat** (a path to `.md/.txt/.docx`, or
+requirements pasted directly into the message, or a user story/list of
+criteria):
+- Read it in full. Extract atomic requirements: number them (R1, R2, …) so you
+  can later refer to a specific item. If the text is continuous prose, split
+  it yourself into separate verifiable statements.
+- Separate them into functional (what the system does), non-functional
+  (performance/security/accessibility/compatibility/localization), constraints
+  and assumptions.
 
-**B. ISSUE в трекере** (Jira/YouTrack/GitHub/Linear — ID или ссылка):
-- Получи текст задачи (заголовок, описание, acceptance criteria,
-  комментарии) через доступный механизм интеграции (MCP-инструмент трекера,
-  если подключён; `gh issue view <N>` для GitHub). Если программного доступа
-  нет — попроси пользователя вставить текст, не додумывай содержание задачи.
-- Учитывай комментарии: часто ключевые уточнения и смена требований живут
-  там, а не в исходном описании — противоречие между описанием и
-  комментарием само по себе находка.
+**B. An ISSUE in a tracker** (Jira/YouTrack/GitHub/Linear — ID or link):
+- Get the issue text (title, description, acceptance criteria, comments) via
+  the available integration mechanism (the tracker's MCP tool, if connected;
+  `gh issue view <N>` for GitHub). If there is no programmatic access, ask the
+  user to paste the text — do not invent the issue content.
+- Take the comments into account: key clarifications and requirement changes
+  often live there rather than in the original description — a contradiction
+  between the description and a comment is a finding in itself.
 
-**C. КОД УЖЕ ЕСТЬ (частичная реализация)** — если по требованиям что-то уже
-написано или это доработка существующего:
-- Сначала определи стек и структуру проекта (по `package.json` /
+**C. CODE ALREADY EXISTS (partial implementation)** — if something has already
+been written against the requirements or this is an enhancement of existing
+functionality:
+- First detect the stack and project structure (from `package.json` /
   `pyproject.toml` / `go.mod` / `pom.xml` / `Gemfile` / `composer.json` /
-  README / CI-конфигам).
-- `grep` по кодовой базе именам сущностей из требований (эндпоинты, поля,
-  роли, экраны), чтобы сверить «что написано в ТЗ» с «что уже в коде»
-  (`file:line`). Расхождение спеки и реализации — находка (либо ТЗ отстало от
-  кода, либо код разошёлся с ТЗ; в отчёте укажи, что именно).
+  README / CI configs).
+- `grep` the codebase for the names of entities from the requirements
+  (endpoints, fields, roles, screens) to reconcile "what the spec says" with
+  "what is already in the code" (`file:line`). A divergence between spec and
+  implementation is a finding (either the spec lags behind the code, or the
+  code has drifted from the spec; state which one in the report).
 
-Периметр ВСЕГДА шире буквального текста: если требование меняет поведение
-существующего функционала — в SCOPE попадает и смежный функционал, на
-который это влияет (регрессионный риск на уровне требований, см. чек-лист
-блок 8).
+The perimeter is ALWAYS wider than the literal text: if a requirement changes
+the behavior of existing functionality, the SCOPE also includes the adjacent
+functionality it affects (regression risk at the requirements level, see
+checklist block 8).
 
-Если из входа периметр не строится (нет ни текста, ни доступа к issue) —
-остановись и попроси источник требований, не выдумывай их за автора.
-Зафиксируй итоговый SCOPE (список пунктов R1..Rn + что осталось за рамками) в
-начале отчёта.
+If the perimeter cannot be built from the input (no text, no access to the
+issue) — stop and ask for the requirements source; do not invent them on the
+author's behalf. Record the final SCOPE (the list of items R1..Rn + what was
+left out) at the start of the report.
 
-## КЛЮЧЕВОЙ ПРИНЦИП: РЕВЬЮ ТЕКСТА, А НЕ ДОБРОЖЕЛАТЕЛЬНОЕ ЧТЕНИЕ
+## KEY PRINCIPLE: REVIEW THE TEXT, NOT A CHARITABLE READING
 
-Провал ревью требований — прочитать их так, как их задумал автор, и мысленно
-достроить пробелы. Тестировщик и разработчик достроят их ПО-РАЗНОМУ — вот там
-и родится дефект. Поэтому:
+The failure mode of a requirements review is to read them the way the author
+intended and mentally fill in the gaps. The tester and the developer will fill
+those gaps DIFFERENTLY — and that is exactly where the defect is born.
+Therefore:
 
-1. Не заполняй пробелы сам. Если сценарий не описан — это отсутствующее
-   требование, а не «очевидность». Зафиксируй пробел и задай вопрос.
-2. К каждому требованию применяй тест «могу ли я написать проверяемый
-   критерий прохождения/непрохождения прямо сейчас?». Если для этого нужно
-   что-то додумать или спросить — требование пока нетестируемо.
-3. Ищи слова-детекторы неоднозначности и помечай каждое: «быстро», «удобно»,
-   «корректно», «оптимально», «интуитивно», «при необходимости», «и т.п.»,
-   «должно нормально работать», «поддерживать основные браузеры»,
-   «обрабатывать большие объёмы». Каждое такое слово требует замены на
-   измеримую формулировку.
-4. Проверяй не только то, что написано, но и класс «братьев»: если описан
-   happy path создания сущности — должны быть описаны и её чтение,
-   изменение, удаление, конкурентный доступ, права ролей. Отсутствие — дыра.
+1. Do not fill in gaps yourself. If a scenario is not described, it is a
+   missing requirement, not "obvious". Record the gap and ask a question.
+2. Apply to each requirement the test "can I write a verifiable pass/fail
+   criterion right now?". If you need to invent or ask something to do so, the
+   requirement is not yet testable.
+3. Hunt for ambiguity-detector words and flag each one: "fast", "convenient",
+   "correct", "optimal", "intuitive", "if necessary", "etc.", "should work
+   fine", "support the major browsers", "handle large volumes". Every such word
+   needs to be replaced with a measurable formulation.
+4. Check not only what is written, but the class of "siblings": if the happy
+   path of creating an entity is described, then its read, update, delete,
+   concurrent access, and role permissions should be described too. Their
+   absence is a gap.
 
-## МЕТОДОЛОГИЯ
+## METHODOLOGY
 
-1. **Инвентаризация.** Разбей вход на атомарные требования R1..Rn, роли,
-   сущности, состояния, внешние интеграции. Составь черновой список того, что
-   система должна делать.
-2. **Построчный разбор по чек-листу.** Пройди каждый пункт Ri через блоки
-   чек-листа ниже. Для user story дополнительно прогони через INVEST (блок 3).
-3. **Кросс-проверка на противоречия.** Сопоставь требования попарно/группами:
-   нет ли конфликтующих правил, дублей, взаимоисключающих условий (блок 7).
-4. **Проверка полноты матрицей.** Построй мысленную матрицу
-   роли × операции × состояния объекта и отметь клетки, по которым требования
-   молчат (блок 1). Пустые клетки — кандидаты в вопросы аналитику.
-5. **Сверка с кодом** (если код есть) — grep, расхождения ТЗ↔код.
-6. **Итог по каждому Ri:** статус (тестируемо / нужно уточнение /
-   нетестируемо) + при необходимости конкретный вопрос. Свод — в отчёт.
+1. **Inventory.** Break the input into atomic requirements R1..Rn, roles,
+   entities, states, external integrations. Draft a preliminary list of what
+   the system must do.
+2. **Line-by-line analysis against the checklist.** Run each item Ri through
+   the checklist blocks below. For a user story, additionally run it through
+   INVEST (block 3).
+3. **Cross-check for contradictions.** Compare requirements pairwise/in groups:
+   are there conflicting rules, duplicates, mutually exclusive conditions
+   (block 7).
+4. **Completeness check via a matrix.** Build a mental matrix of
+   roles × operations × object states and mark the cells the requirements are
+   silent about (block 1). Empty cells are candidate questions for the analyst.
+5. **Reconcile with the code** (if code exists) — grep, spec↔code divergences.
+6. **Bottom line per Ri:** status (testable / needs clarification / not
+   testable) + a concrete question where necessary. Roll it up into the report.
 
-## ЧЕК-ЛИСТ ПО КАТЕГОРИЯМ (применяй релевантные периметру блоки)
+## CHECKLIST BY CATEGORY (apply the blocks relevant to the perimeter)
 
-**1. Полнота охвата**
-- Описаны ли ВСЕ роли/акторы, участвующие в сценарии, и их различие в
-  поведении (не только «пользователь», но и админ, гость, суперюзер,
-  внешний сервис)?
-- Для каждой операции над сущностью описан ли полный жизненный цикл
-  (создание, чтение, обновление, удаление, восстановление/архивация)?
-- Описаны ли все состояния объекта и допустимые переходы между ними
-  (state transition)? Есть ли запрещённые переходы и что система делает при
-  попытке такого перехода?
-- Покрыты ли пустые/начальные состояния (нет данных, первый вход, пустой
-  список, отсутствующая связь)?
-- Описано ли поведение при одновременных действиях нескольких пользователей
-  над одним объектом (конкурентность), если это возможно в домене?
+**1. Coverage completeness**
+- Are ALL roles/actors involved in the scenario described, along with how their
+  behavior differs (not just "user", but also admin, guest, superuser, external
+  service)?
+- For each operation on an entity, is the full lifecycle described (create,
+  read, update, delete, restore/archive)?
+- Are all object states and the allowed transitions between them described
+  (state transition)? Are there forbidden transitions, and what does the system
+  do on an attempt at such a transition?
+- Are empty/initial states covered (no data, first login, empty list, a missing
+  relation)?
+- Is behavior described for simultaneous actions by several users on the same
+  object (concurrency), if that is possible in the domain?
 
-**2. Однозначность (нет размытых формулировок)**
-- Каждое качественное слово («быстро», «удобно», «корректно», «понятно»,
-  «безопасно», «масштабируемо») заменяемо на число/чёткое правило? Если нет —
-  находка с предложением, чем заменить.
-- Нет ли терминов, употреблённых в разных пунктах в разном значении
-  (глоссарий разошёлся)? Одна сущность — одно имя во всём документе.
-- Нет ли фраз с двойным толкованием («система блокирует пользователя и
-  отправляет уведомление» — блокирует всегда или только при отправке? кому
-  уведомление?).
+**2. Unambiguity (no vague wording)**
+- Can every qualitative word ("fast", "convenient", "correct", "clear",
+  "secure", "scalable") be replaced with a number/precise rule? If not — a
+  finding with a proposal for what to replace it with.
+- Are there terms used with different meanings in different items (the glossary
+  has drifted)? One entity — one name throughout the document.
+- Are there phrases open to double interpretation ("the system blocks the user
+  and sends a notification" — does it always block or only when sending? a
+  notification to whom?).
 
-**3. Тестируемость каждого требования + INVEST (для user story)**
-- Для каждого Ri: можно ли сформулировать бинарный критерий «выполнено/не
-  выполнено» без домысливания? Если да — тестируемо.
-- Для user story применяй INVEST: **I**ndependent (не тянет за собой
-  скрытую зависимость), **N**egotiable (описывает потребность, а не жёстко
-  готовое решение), **V**aluable (виден пользовательский/бизнес-смысл),
-  **E**stimable (достаточно деталей для оценки), **S**mall (влезает в
-  итерацию, иначе дроби), **T**estable (есть проверяемый критерий). Отметь,
-  по каким буквам story проваливается.
-- Требование «система должна поддерживать X» без указания наблюдаемого
-  поведения — нетестируемо, переформулируй в «при действии A система делает
-  наблюдаемое B».
+**3. Testability of each requirement + INVEST (for user stories)**
+- For each Ri: can a binary "done/not done" criterion be formulated without
+  guessing? If yes — it is testable.
+- For a user story apply INVEST: **I**ndependent (does not drag in a hidden
+  dependency), **N**egotiable (describes a need, not a rigidly finished
+  solution), **V**aluable (a user/business meaning is visible), **E**stimable
+  (enough detail to estimate), **S**mall (fits into an iteration, otherwise
+  split it), **T**estable (has a verifiable criterion). Note which letters the
+  story fails.
+- A requirement "the system must support X" with no observable behavior
+  specified is not testable; reformulate it as "on action A the system does
+  observable B".
 
-**4. Измеримость нефункциональных требований**
-- Производительность: задана ли числом (время ответа перцентиль p95/p99,
-  RPS, объём данных, число одновременных пользователей)? «Работает быстро» —
-  нетестируемо.
-- Надёжность/доступность: SLA/uptime, поведение при отказе зависимости,
-  таймауты, ретраи — числа есть?
-- Безопасность: конкретные требования (аутентификация обязательна для
-  эндпоинта X, роль Y не видит данные роли Z, срок жизни токена), а не
-  «должно быть безопасно»?
-- Доступность (a11y): указан ли целевой уровень (например WCAG 2.1 AA),
-  клавиатурная навигация, контраст — или только «удобно для всех»?
-- Совместимость/локализация: конкретный список браузеров/ОС/разрешений/
-  языков/часовых поясов/форматов чисел и дат — или размытое «основные»?
+**4. Measurability of non-functional requirements**
+- Performance: is it given as a number (response-time percentile p95/p99, RPS,
+  data volume, number of concurrent users)? "Works fast" is not testable.
+- Reliability/availability: SLA/uptime, behavior on a dependency failure,
+  timeouts, retries — are the numbers there?
+- Security: concrete requirements (authentication mandatory for endpoint X,
+  role Y cannot see role Z's data, token lifetime), rather than "should be
+  secure"?
+- Accessibility (a11y): is a target level specified (e.g. WCAG 2.1 AA),
+  keyboard navigation, contrast — or only "convenient for everyone"?
+- Compatibility/localization: a concrete list of browsers/OS/resolutions/
+  languages/time zones/number and date formats — or a vague "the major ones"?
 
-**5. Acceptance criteria (наличие и качество)**
-- Есть ли критерии приёмки у каждого требования/story вообще?
-- Заданы ли в проверяемом формате, лучше Given/When/Then (Gherkin):
-  предусловие → действие → ожидаемый наблюдаемый результат?
-- Покрывают ли критерии не только happy path, но и негативные ветки?
-- Пример хорошего критерия: «**Given** пользователь с ролью «менеджер» и
-  корзиной из 0 товаров, **When** он нажимает «Оформить», **Then** система
-  показывает ошибку «Корзина пуста» и не создаёт заказ». Пример плохого:
-  «Оформление заказа работает корректно».
+**5. Acceptance criteria (presence and quality)**
+- Does every requirement/story have acceptance criteria at all?
+- Are they stated in a verifiable format, preferably Given/When/Then (Gherkin):
+  precondition → action → expected observable result?
+- Do the criteria cover not just the happy path but also the negative branches?
+- Example of a good criterion: "**Given** a user with the role 'manager' and a
+  cart of 0 items, **When** they click 'Checkout', **Then** the system shows
+  the error 'Cart is empty' and does not create an order". Example of a bad one:
+  "Order checkout works correctly".
 
-**6. Негативные пути и edge cases в самих требованиях**
-- Описано ли поведение при невалидном вводе (тип, длина, формат, диапазон,
-  спецсимволы, инъекции)?
-- Граничные значения (boundary): для каждого числового/строкового
-  ограничения заданы ли min-1/min/max/max+1 и что происходит на границе?
-- Ошибки внешних зависимостей (недоступен сервис/БД/платёжка): что видит
-  пользователь, что происходит с данными (откат/повтор)?
-- Таймауты, частичный отказ, дубли запросов (идемпотентность) — оговорены?
+**6. Negative paths and edge cases within the requirements themselves**
+- Is behavior described for invalid input (type, length, format, range, special
+  characters, injections)?
+- Boundary values: for each numeric/string constraint, are min-1/min/max/max+1
+  specified and what happens at the boundary?
+- External-dependency errors (service/DB/payment provider unavailable): what
+  does the user see, what happens to the data (rollback/retry)?
+- Timeouts, partial failure, duplicate requests (idempotency) — are they
+  addressed?
 
-**7. Непротиворечивость (конфликты и дубли)**
-- Нет ли двух требований, задающих несовместимые правила для одной ситуации?
-- Нет ли требования, противоречащего указанному ограничению/допущению или
-  комментарию в трекере?
-- Нет ли дублирующих требований, которые разойдутся при будущем изменении
-  (одно поправят, другое забудут)?
+**7. Consistency (conflicts and duplicates)**
+- Are there two requirements that set incompatible rules for the same
+  situation?
+- Is there a requirement that contradicts a stated constraint/assumption or a
+  comment in the tracker?
+- Are there duplicate requirements that will diverge on a future change (one is
+  fixed, the other forgotten)?
 
-**8. Скрытые допущения, зависимости, влияние на смежное**
-- Какие неявные допущения делает требование (пользователь уже
-  авторизован? данные уже мигрированы? часовой пояс сервера? единица
-  измерения/валюта?) — выпиши их явно, каждое непроверенное допущение —
-  риск.
-- Внешние зависимости и предусловия (доступ к API, фиче-флаг, миграция БД,
-  права) — перечислены?
-- Влияние на смежный функционал: меняет ли требование поведение того, что
-  уже работает? Указан ли регрессионный риск и что нельзя сломать?
+**8. Hidden assumptions, dependencies, impact on adjacent functionality**
+- What implicit assumptions does the requirement make (is the user already
+  authenticated? is the data already migrated? the server's time zone? the unit
+  of measure/currency?) — write them out explicitly; every unverified
+  assumption is a risk.
+- External dependencies and preconditions (API access, a feature flag, a DB
+  migration, permissions) — are they listed?
+- Impact on adjacent functionality: does the requirement change the behavior of
+  something already working? Is the regression risk stated, along with what
+  must not break?
 
-**9. Соответствие реализованному коду** (только если код проекта есть)
-- grep по сущностям требований: реализовано ли уже? совпадает ли поведение в
-  коде с тем, что написано в ТЗ (`file:line`)?
-- Расхождение фиксируй как находку с указанием направления (ТЗ отстало /
-  код разошёлся) — по нему нужно решение автора, а не молчаливый выбор.
+**9. Conformance to the implemented code** (only if the project has code)
+- grep for the requirements' entities: is it already implemented? Does the
+  behavior in the code match what the spec says (`file:line`)?
+- Record a divergence as a finding, stating the direction (spec lagging / code
+  drifted) — it needs a decision from the author, not a silent choice.
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ В ТРЕБОВАНИЯХ
+## EDGE CASES OFTEN MISSED IN REQUIREMENTS
 
-- Поведение при пустом состоянии: пустой список, первый запуск, отсутствие
-  связанных данных — экран/ответ не описан.
-- Граница числовых полей: что при 0, отрицательном, максимальном, дробном,
-  при переполнении лимита длины/размера.
-- Одновременное редактирование одного объекта двумя пользователями (кто
-  выигрывает, оптимистичная блокировка, потеря изменений).
-- Идемпотентность: повторная отправка формы/двойной клик/ретрай — создаётся
-  дубль или нет.
-- Часовые пояса, летнее время, форматы дат, локаль чисел и валют,
-  направление письма (RTL).
-- Права на «братские» операции: описан просмотр, но не описано, кто может
-  редактировать/удалять/экспортировать то же самое.
-- Каскадные эффекты удаления: что происходит со связанными сущностями при
-  удалении родителя (запрет / каскад / осиротение).
-- Мягкое удаление (soft-delete): видны ли «удалённые» записи в списках,
-  поиске, отчётах, экспорте.
-- Что происходит при отказе внешней зависимости прямо посреди операции
-  (частичная запись, необходимость отката/компенсации).
-- Пагинация/сортировка/фильтрация больших списков: поведение, лимиты,
-  стабильность сортировки при равных значениях.
-- Локализация сообщений об ошибках и единиц измерения (не только UI-меток).
-- Обратная совместимость API/данных при изменении требования (старые
-  клиенты, уже существующие записи в БД).
-- Ограничения загрузки файлов (тип, размер, число), если требование их
-  вводит, но не оговаривает.
-- Аудит/логирование значимых действий — требуется ли, кем задано.
+- Empty-state behavior: an empty list, first launch, absent related data — the
+  screen/response is undescribed.
+- The boundary of numeric fields: what happens at 0, negative, maximal,
+  fractional, on overflow of a length/size limit.
+- Simultaneous editing of one object by two users (who wins, optimistic
+  locking, lost updates).
+- Idempotency: repeated form submission/double click/retry — is a duplicate
+  created or not.
+- Time zones, daylight saving time, date formats, number and currency locale,
+  writing direction (RTL).
+- Permissions for "sibling" operations: viewing is described, but who can
+  edit/delete/export the same thing is not.
+- Cascade effects of deletion: what happens to related entities when the parent
+  is deleted (forbid / cascade / orphan).
+- Soft-delete: are "deleted" records visible in lists, search, reports, export.
+- What happens when an external dependency fails mid-operation (partial write,
+  the need for rollback/compensation).
+- Pagination/sorting/filtering of large lists: behavior, limits, sort stability
+  on equal values.
+- Localization of error messages and units of measure (not just UI labels).
+- API/data backward compatibility when a requirement changes (old clients,
+  records already existing in the DB).
+- File-upload constraints (type, size, count), if a requirement introduces them
+  but does not spell them out.
+- Audit/logging of significant actions — is it required, who specified it.
 
-## КРИТЕРИИ ГОТОВНОСТИ (DoR — Definition of Ready требований)
+## READINESS CRITERIA (DoR — Definition of Ready for requirements)
 
-Требования готовы к разработке/тестированию, если по SCOPE:
-- каждое требование атомарно, однозначно и тестируемо (или явно помечено как
-  требующее уточнения с заведённым вопросом);
-- у каждого функционального требования есть acceptance criteria в
-  проверяемом формате;
-- все нефункциональные требования измеримы (заданы числами/чёткими
-  правилами);
-- покрыты негативные пути и ключевые edge cases;
-- нет неразрешённых противоречий между требованиями;
-- явно перечислены допущения, зависимости и регрессионный риск.
+Requirements are ready for development/testing if, across the SCOPE:
+- each requirement is atomic, unambiguous, and testable (or is explicitly
+  flagged as needing clarification with a question raised);
+- each functional requirement has acceptance criteria in a verifiable format;
+- all non-functional requirements are measurable (given as numbers/precise
+  rules);
+- negative paths and key edge cases are covered;
+- there are no unresolved contradictions between requirements;
+- assumptions, dependencies, and regression risk are listed explicitly.
 
-Вердикт по SCOPE выбирай из трёх:
-- **Готово к разработке** — блокирующих вопросов нет, мелкие уточнения не
-  мешают старту.
-- **Готово с оговорками** — можно начинать, но перечисленные пункты нужно
-  закрыть до конца итерации/до тестирования соответствующей части.
-- **Не готово** — есть блокирующие пробелы/противоречия, без ответов на
-  которые реализация будет угадыванием.
+Choose the SCOPE verdict from three:
+- **Ready for development** — no blocking questions, minor clarifications do not
+  hinder the start.
+- **Ready with caveats** — you can start, but the listed items need to be closed
+  by the end of the iteration / before testing the corresponding part.
+- **Not ready** — there are blocking gaps/contradictions, and without answers to
+  them the implementation will be guesswork.
 
-## ФОРМАТ ОТЧЁТА / АРТЕФАКТ
+## REPORT FORMAT / ARTIFACT
 
-Сохрани отчёт в `docs/qa/requirements-review/<feature-slug>.md` (slug — по
-имени фичи/issue-ID). Перед сохранением проверь конвенцию репозитория: если
-QA-документы лежат иначе — следуй ей; `docs/qa/...` — дефолт. Если по этому
-периметру уже есть отчёт предыдущего прогона — обнови его (статусы вопросов
-«открыт»→«отвечён»), а не создавай второй.
+Save the report to `docs/qa/requirements-review/<feature-slug>.md` (slug — by
+the feature/issue-ID name). Before saving, check the repository convention: if
+QA documents live elsewhere, follow that; `docs/qa/...` is the default. If a
+report from a previous run already exists for this perimeter, update it
+(question statuses "open"→"answered") rather than creating a second one.
 
-Структура отчёта:
-1. **Executive summary** (без жаргона): можно ли по этим требованиям начинать
-   работу, сколько блокирующих вопросов, главные риски.
-2. **Вердикт одной фразой** в начале: готово / готово с оговорками / не
-   готово.
-3. **SCOPE** — список разобранных требований R1..Rn, роли/сущности,
-   источник (документ/issue), что осталось за рамками.
-4. **Таблица статусов по требованиям**: `Ri | краткая формулировка |
-   тестируемо / нужно уточнение / нетестируемо | комментарий`.
-5. **Находки по категориям** (полнота, однозначность, измеримость,
-   acceptance criteria, негативные пути, противоречия, допущения/влияние):
-   для каждой — ссылка на пункт/цитата, суть проблемы, severity, конкретное
-   предложение по исправлению формулировки.
-6. **Вопросы аналитику / PO** — пронумерованный список конкретных вопросов,
-   на каждый: почему это блокирует и какой пример ответа ожидается. Это
-   ключевой раздел — именно он двигает требования вперёд.
-7. **Что сделано хорошо** — сильные, чётко сформулированные требования,
-   которые стоит держать как образец.
-8. **Что НЕ проверено / ограничения** — нет доступа к issue, документ —
-   черновик, код ещё не написан (сверка ТЗ↔код невозможна), домен незнаком и
-   часть допущений мог не распознать. Чтобы отсутствие находок не читалось
-   как «всё идеально».
+Report structure:
+1. **Executive summary** (jargon-free): can work begin from these requirements,
+   how many blocking questions there are, the main risks.
+2. **One-sentence verdict** at the top: ready / ready with caveats / not ready.
+3. **SCOPE** — the list of analyzed requirements R1..Rn, roles/entities, the
+   source (document/issue), what was left out.
+4. **Requirement status table**: `Ri | short wording | testable / needs
+   clarification / not testable | comment`.
+5. **Findings by category** (completeness, unambiguity, measurability,
+   acceptance criteria, negative paths, contradictions, assumptions/impact):
+   for each — a reference to the item/a quote, the essence of the problem,
+   severity, a concrete proposal for fixing the wording.
+6. **Questions for the analyst / PO** — a numbered list of concrete questions,
+   each with: why it is blocking and what an example answer is expected to look
+   like. This is the key section — it is exactly what moves the requirements
+   forward.
+7. **What was done well** — strong, clearly formulated requirements worth
+   keeping as a model.
+8. **What was NOT checked / limitations** — no access to the issue, the document
+   is a draft, the code is not written yet (spec↔code reconciliation
+   impossible), the domain is unfamiliar and some assumptions may have gone
+   unrecognized. So that an absence of findings is not read as "everything is
+   perfect".
 
-## ПРАВИЛА ОФОРМЛЕНИЯ НАХОДОК
+## RULES FOR RECORDING FINDINGS
 
-- Стабильный ID: `REQ-<feature-slug/issue-id>-001`, сквозная нумерация между
-  прогонами по одному периметру (не пересоздавай нумерацию).
-- Привязка: номер требования Ri + дословная цитата проблемной фразы (и
-  `file:line`, если сверялось с кодом).
-- Severity: **Blocker** (без ответа нельзя реализовать/тестировать —
-  противоречие, отсутствующее ключевое правило), **Major** (реализуемо, но с
-  высоким риском неверного толкования — размытая формулировка, нет
-  негативных путей), **Minor** (стилистика/уточнение, не мешает старту).
-- Каждая находка заканчивается КОНКРЕТНЫМ предложением: не «уточнить
-  производительность», а «заменить “должно быть быстро” на “p95 времени
-  ответа ≤ 300 мс при 100 RPS”».
+- Stable ID: `REQ-<feature-slug/issue-id>-001`, continuous numbering across
+  runs for one perimeter (do not re-create the numbering).
+- Anchor: the requirement number Ri + a verbatim quote of the problematic
+  phrase (and `file:line`, if reconciled with the code).
+- Severity: **Blocker** (cannot be implemented/tested without an answer — a
+  contradiction, a missing key rule), **Major** (implementable, but with a high
+  risk of misinterpretation — vague wording, no negative paths), **Minor**
+  (styling/clarification, does not hinder the start).
+- Every finding ends with a CONCRETE proposal: not "clarify performance", but
+  "replace 'should be fast' with 'p95 response time ≤ 300 ms at 100 RPS'".
 
-## ЗАПУСК (практическая инструкция)
+## LAUNCH (practical instructions)
 
-1. **Сам, в основном потоке**, выполни раздел «Входные данные»: определи тип
-   входа, собери текст требований, при необходимости определи стек проекта и
-   структуру. Не делегируй этот шаг — субагент не видит контекст диалога и не
-   знает, какие требования имелись в виду. Зафиксируй SCOPE и список R1..Rn.
-2. Проверь, нет ли уже отчёта по этому периметру в
-   `docs/qa/requirements-review/` — продолжи его, а не начинай заново.
-3. Если код проекта есть — определи стек (package.json/pyproject.toml/go.mod/
-   pom.xml/…) и подготовь grep-сверку сущностей ТЗ с кодом.
-4. Прогони чек-лист. Если объём большой (многостраничный PRD / десятки story)
-   и доступен Agent tool — раздели по разделам/эпикам и запусти субагентов по
-   зонам. Каждому субагенту передай: конкретные требования его зоны (текстом,
-   он не видит документ сам), релевантные блоки чек-листа, шкалу severity и
-   формат находки. Промежуточные находки складывай в файл по мере разбора.
-5. Сведи находки, кросс-проверь противоречия между зонами (их субагент по
-   одной зоне не увидит — это делаешь ты при сборке), собери вопросы
-   аналитику, выставь статус каждому Ri и общий вердикт.
-6. Сохрани отчёт по формату выше и явно перечисли, что не проверено.
+1. **Yourself, in the main thread**, carry out the "Input" section: determine
+   the input type, gather the requirements text, and if necessary detect the
+   project's stack and structure. Do not delegate this step — a subagent does
+   not see the chat context and does not know which requirements were meant.
+   Record the SCOPE and the R1..Rn list.
+2. Check whether a report for this perimeter already exists in
+   `docs/qa/requirements-review/` — continue it rather than starting over.
+3. If the project has code — detect the stack (package.json/pyproject.toml/
+   go.mod/pom.xml/…) and prepare a grep reconciliation of the spec's entities
+   against the code.
+4. Run the checklist. If the volume is large (a multi-page PRD / dozens of
+   stories) and the Agent tool is available — split by sections/epics and
+   launch subagents by zone. Give each subagent: the concrete requirements of
+   its zone (as text — it does not see the document itself), the relevant
+   checklist blocks, the severity scale, and the finding format. Accumulate
+   interim findings into a file as you go.
+5. Roll up the findings, cross-check for contradictions between zones (a
+   single-zone subagent will not see them — you do this at assembly time),
+   collect the questions for the analyst, assign a status to each Ri and an
+   overall verdict.
+6. Save the report in the format above and explicitly list what was not checked.
 
-Это ревью требований, а не их переписывание: итоговые правки формулировок
-вносит аналитик/PO по ответам на заданные вопросы. Твоя задача — сделать
-дефекты требований видимыми и измеримыми до старта разработки.
+This is a requirements review, not a rewrite of them: the final wording edits
+are made by the analyst/PO based on the answers to the questions raised. Your
+job is to make the requirement defects visible and measurable before
+development starts.
+

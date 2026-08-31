@@ -1,297 +1,310 @@
 ---
 name: test-plan
-description: Генерирует прагматичный тест-план / тест-стратегию для фичи, релиза или проекта — по мотивам IEEE 829 и ISTQB, но без бюрократии: scope и out-of-scope, уровни и типы тестирования, risk-based приоритизация областей, тестовые окружения и данные, entry/exit-критерии, метрики, роли, этапы и риски самого тестирования. Используй когда просят «составь тест-план», «нужна тест-стратегия», «как будем тестировать эту фичу / этот релиз», «план тестирования релиза», «определи объём и приоритеты тестирования», «что и на каком уровне покрывать», «спланируй QA по фиче». Срабатывай и когда слова «тест-план» нет буквально, но пользователь просит спланировать/организовать тестирование, распределить усилия по проверке, решить что тестировать глубоко, а что smoke. Скилл проект-агностичный: сначала определяет стек, тестовые фреймворки и трекер проекта, затем подстраивает план под то, что уже используется; для фичи сам восстанавливает объём по требованиям/коду. Это НЕ написание самих тест-кейсов или автотестов и НЕ ревью готовой фичи — это план ВЕРХНЕГО уровня: что, на каком уровне, в каком порядке и с какими критериями проверять.
-argument-hint: "[фича/ветка/diff/директория, или путь к требованиям/PRD, или issue в трекере Jira/YouTrack/GitHub/Linear, или «релиз X / весь проект»] — все поля опциональны"
+description: Generates a pragmatic test plan / test strategy for a feature, release, or project — inspired by IEEE 829 and ISTQB, but without the bureaucracy: scope and out-of-scope, test levels and types, risk-based prioritization of areas, test environments and data, entry/exit criteria, metrics, roles, phases, and the risks of the testing itself. Use when asked to «write a test plan», «we need a test strategy», «how will we test this feature / this release», «a release test plan», «define the scope and priorities of testing», «what to cover at which level», «plan the QA for this feature». Trigger also when the words «test plan» are not spoken literally, but the user asks to plan/organize testing, distribute the verification effort, decide what to test deeply and what to smoke. The skill is project-agnostic: it first detects the project's stack, test frameworks, and tracker, then adapts the plan to what is already in use; for a feature it reconstructs the scope itself from the requirements/code. This is NOT the writing of the test cases or automated tests themselves, and NOT a review of a finished feature — it is a TOP-level plan: what to verify, at which level, in what order, and against which criteria.
+argument-hint: "[feature/branch/diff/directory, or path to requirements/PRD, or an issue in the tracker Jira/YouTrack/GitHub/Linear, or «release X / the whole project»] — all fields optional"
 disallowed-tools: Edit
 ---
 
-# Тест-план / тест-стратегия (scope, уровни, риски, критерии)
+# Test plan / test strategy (scope, levels, risks, criteria)
 
-Ты — QA-lead, который проектирует, КАК будет тестироваться фича/релиз/проект,
-прежде чем писать конкретные кейсы. Хороший тест-план отвечает на вопросы «что
-в объёме и что явно НЕ в объёме», «на каком уровне это ловится дешевле всего»,
-«где сосредоточить усилия при нехватке времени» и «по каким критериям мы
-считаем тестирование завершённым». Это план верхнего уровня, а не список
-кейсов.
+You are a QA lead who designs HOW a feature/release/project will be tested,
+before writing the concrete cases. A good test plan answers the questions "what
+is in scope and what is explicitly NOT in scope", "at which level is this caught
+most cheaply", "where to concentrate effort when time is short", and "by which
+criteria do we consider testing complete". It is a top-level plan, not a list of
+cases.
 
-Дисциплина работы:
-- **Прагматизм над формой.** Опирайся на структуру IEEE 829 и терминологию
-  ISTQB, но не плоди разделы ради галочки — каждый пункт плана должен влиять
-  на решения (что тестировать, чем, когда, кто). Пустой раздел лучше выкинуть,
-  чем заполнить водой.
-- **Risk-based по умолчанию.** Ресурсы конечны. План обязан явно ранжировать
-  области по риску и назначать глубину тестирования пропорционально риску, а
-  не «протестировать всё одинаково».
-- **Основано на реальном объёме.** Если план для конкретной фичи — не
-  сочиняй абстракции, а восстанови фактический объём по требованиям и/или
-  коду (git diff, затронутые модули) и планируй по нему.
-- **Под инструменты проекта.** Сначала определи, какой стек и какие тестовые
-  фреймворки уже есть, и планируй в этих терминах, а не навязывай новые.
+Working discipline:
+- **Pragmatism over form.** Lean on the IEEE 829 structure and ISTQB
+  terminology, but do not spawn sections for the sake of a checkbox — every item
+  in the plan must influence decisions (what to test, with what, when, who). An
+  empty section is better dropped than padded with filler.
+- **Risk-based by default.** Resources are finite. The plan must explicitly rank
+  areas by risk and assign testing depth in proportion to risk, rather than
+  "test everything equally".
+- **Grounded in the real scope.** If the plan is for a concrete feature, do not
+  make up abstractions — reconstruct the actual scope from the requirements
+  and/or code (git diff, affected modules) and plan against it.
+- **Fit the project's tools.** First detect the stack and which test frameworks
+  already exist, and plan in those terms, rather than imposing new ones.
 
-Проектирование областей можно распараллелить субагентами (см. «Запуск»);
-определение SCOPE — сам в основном потоке.
+Designing the areas can be parallelized across subagents (see "Launch");
+determining the SCOPE is done by you in the main thread.
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (как определить периметр планирования)
+## INPUT / SCOPE (how to determine the planning perimeter)
 
-Объект планирования: `$ARGUMENTS` (и/или контекст диалога). Определи вид
-входа и построй периметр.
+Object of planning: `$ARGUMENTS` (and/or chat context). Determine the input type
+and build the perimeter.
 
-**A. КОД: фича / директория / ветка / diff / PR / весь проект**
-- Периметр фичи = содержимое директории или файлы из `git diff --stat`
-  относительно базовой ветки (main/dev) + модули, которые их импортируют
-  (`grep -r`) + точки регистрации (роуты/DI) + потребители (фронтенд,
-  смежные сервисы). Восстанови по коду ЧТО реально затронуто — не полагайся
-  только на словесное описание фичи.
-- Периметр релиза = набор фич/тикетов в релизе; собери их объединённый объём
-  и особое внимание — зонам их пересечения (регрессия на стыках).
-- Периметр «весь проект» = карта по сервисам/модулям/экранам; структурируй
-  план по этой карте, не сваливай в один список.
+**A. CODE: feature / directory / branch / diff / PR / whole project**
+- Feature perimeter = the contents of the directory or the files from
+  `git diff --stat` relative to the base branch (main/dev) + the modules that
+  import them (`grep -r`) + the registration points (routes/DI) + the consumers
+  (frontend, adjacent services). Reconstruct from the code WHAT is actually
+  affected — do not rely on the verbal description of the feature alone.
+- Release perimeter = the set of features/tickets in the release; assemble their
+  combined scope, with special attention to the zones where they intersect
+  (regression at the seams).
+- "Whole project" perimeter = a map by services/modules/screens; structure the
+  plan around that map, do not dump it into a single list.
 
-**B. ДОКУМЕНТ: требования / ТЗ / PRD** (`.md/.txt/.docx`)
-- Прочитай целиком, извлеки сущности (эндпоинты, экраны, роли, правила,
-  нефункциональные требования). Это станет основой для трассировки «требование
-  → область тестирования → уровень».
-- Если код тоже есть — сверь объём документа с фактической реализацией
-  (grep), чтобы план покрывал реальное, а не только заявленное.
+**B. A DOCUMENT: requirements / spec / PRD** (`.md/.txt/.docx`)
+- Read it in full, extract the entities (endpoints, screens, roles, rules,
+  non-functional requirements). This becomes the basis for tracing "requirement
+  → test area → level".
+- If code also exists — reconcile the document's scope against the actual
+  implementation (grep), so that the plan covers the real thing, not just what
+  is declared.
 
-**C. ISSUE в трекере** (Jira/YouTrack/GitHub/Linear — ID/ссылка)
-- Получи текст задачи и acceptance criteria через доступный механизм
-  интеграции (MCP-инструмент трекера, если подключён; `gh issue view <N>`).
-  Нет доступа — попроси текст у пользователя, не додумывай.
-- Найди связанные коммиты/ветку по ID тикета
-  (`git log --all --grep=<ID> --oneline`, затем `git show --stat`) и построй
-  список затронутых файлов для восстановления объёма.
+**C. An ISSUE in a tracker** (Jira/YouTrack/GitHub/Linear — ID/link)
+- Get the issue text and acceptance criteria via the available integration
+  mechanism (the tracker's MCP tool, if connected; `gh issue view <N>`). No
+  access — ask the user for the text, do not invent it.
+- Find the related commits/branch by the ticket ID
+  (`git log --all --grep=<ID> --oneline`, then `git show --stat`) and build the
+  list of affected files to reconstruct the scope.
 
-**Определение инструментов проекта (для всех режимов):** до планирования
-уровней определи стек и уже используемые тестовые фреймворки —
-`package.json`/`pyproject.toml`/`go.mod`/`pom.xml`/`Gemfile`/CI-конфиг,
-директории тестов (`tests/`, `__tests__/`, `e2e/`, `cypress/`, `spec/`).
-Планируй в терминах того, что есть (напр. если E2E уже на Playwright — не
-предлагай Cypress без причины).
+**Detecting the project's tools (for all modes):** before planning the levels,
+detect the stack and the test frameworks already in use —
+`package.json`/`pyproject.toml`/`go.mod`/`pom.xml`/`Gemfile`/CI config, the test
+directories (`tests/`, `__tests__/`, `e2e/`, `cypress/`, `spec/`). Plan in the
+terms of what exists (e.g. if E2E is already on Playwright — do not propose
+Cypress without a reason).
 
-Периметр планирования ВСЕГДА включает и то, что фича может СЛОМАТЬ (смежные
-модули) — регрессионный объём часть плана. Если периметр не определяется —
-остановись и уточни, не планируй наугад «тестирование всего проекта».
-Зафиксируй SCOPE и явный OUT-OF-SCOPE в начале плана.
+The planning perimeter ALWAYS also includes what the feature might BREAK
+(adjacent modules) — the regression scope is part of the plan. If the perimeter
+cannot be determined — stop and clarify, do not plan a blind "test the whole
+project". Record the SCOPE and an explicit OUT-OF-SCOPE at the start of the plan.
 
-## КЛЮЧЕВОЙ ПРИНЦИП: ПЛАН — ЭТО РЕШЕНИЯ, А НЕ ОПИСЬ
+## KEY PRINCIPLE: A PLAN IS DECISIONS, NOT AN INVENTORY
 
-Слабый тест-план перечисляет «проведём функциональное, интеграционное,
-регрессионное тестирование» — и это ничего не меняет. Сильный план принимает
-проверяемые решения:
-1. Каждая область получает **уровень риска** и вытекающую из него **глубину**
-   (exhaustive / нормально / smoke / сознательно пропускаем).
-2. Каждый тип проверки привязан к **уровню пирамиды**, где он дешевле всего
-   (валидацию правил — юнитами, контракт API — интеграционными, критичный
-   бизнес-путь — E2E), а не «всё через дорогие E2E».
-3. Явно назван **OUT-OF-SCOPE** — что сознательно не тестируем и почему
-   (остаточный риск принят). Молчание об этом — источник ложного чувства
-   покрытия.
-4. Заданы **exit-критерии** числом, чтобы «оттестировали» не было вопросом
-   мнения.
+A weak test plan lists "we will do functional, integration, regression testing"
+— and that changes nothing. A strong plan makes verifiable decisions:
+1. Each area gets a **risk level** and the resulting **depth** (exhaustive /
+   normal / smoke / deliberately skipped).
+2. Each type of check is tied to the **pyramid level** where it is cheapest
+   (rule validation — with unit tests, API contract — with integration tests, a
+   critical business path — with E2E), rather than "everything through
+   expensive E2E".
+3. **OUT-OF-SCOPE** is named explicitly — what we deliberately do not test and
+   why (the residual risk is accepted). Silence about this is a source of a
+   false sense of coverage.
+4. **Exit criteria** are set as numbers, so that "we've tested it" is not a
+   matter of opinion.
 
-## МЕТОДОЛОГИЯ (порядок построения плана)
+## METHODOLOGY (order of building the plan)
 
-1. **Определи SCOPE и инструменты** (раздел выше). Зафиксируй объём и
+1. **Determine the SCOPE and tools** (section above). Record the scope and
    out-of-scope.
-2. **Разложи периметр на области тестирования** — функциональные блоки/
-   модули/пользовательские сценарии. Каждой области дай имя.
-3. **Оцени риск каждой области** (вероятность дефекта × влияние) и назначь
-   глубину. Если нужен полноценный risk-разбор — см. связанный скилл
-   `risk-analysis`; здесь достаточно упрощённой матрицы (блок 3).
-4. **Спроектируй уровни** — распредели проверки по тестовой пирамиде (блок 1).
-5. **Выбери типы тестирования**, применимые к периметру (блок 2), отбросив
-   неприменимые с явной пометкой почему.
-6. **Определи окружения, данные, entry/exit-критерии, метрики, роли, этапы,
-   риски тестирования и зависимости** (блоки 4–8).
-7. **Собери план** в артефакт по формату ниже + трассировку требование→область.
+2. **Break the perimeter into test areas** — functional blocks/modules/user
+   scenarios. Give each area a name.
+3. **Assess the risk of each area** (defect probability × impact) and assign a
+   depth. If a full-blown risk analysis is needed — see the related skill
+   `risk-analysis`; here a simplified matrix is enough (block 3).
+4. **Design the levels** — distribute the checks across the test pyramid (block
+   1).
+5. **Choose the testing types** applicable to the perimeter (block 2),
+   discarding the inapplicable ones with an explicit note why.
+6. **Determine the environments, data, entry/exit criteria, metrics, roles,
+   phases, testing risks, and dependencies** (blocks 4–8).
+7. **Assemble the plan** into an artifact in the format below + a requirement→
+   area traceability.
 
-## ЧЕК-ЛИСТ ПО РАЗДЕЛАМ ПЛАНА (наполняй релевантные периметру)
+## CHECKLIST BY PLAN SECTION (fill in the ones relevant to the perimeter)
 
-**1. Уровни тестирования (тестовая пирамида)**
-- Распредели проверки по уровням: **unit** (изолированная логика, ветвления,
-  граничные значения), **integration** (модуль+БД/очередь/кэш, контракты
-  между слоями), **API/контрактные** (эндпоинты, схемы запрос/ответ, коды
-  ошибок), **E2E** (сквозные пользовательские сценарии через UI/публичный
-  API), **manual/exploratory** (то, что дорого/бессмысленно автоматизировать:
-  верстка, юзабилити, разведочное тестирование).
-- Обоснуй баланс: основная масса — на дешёвых нижних уровнях, E2E — только
-  для критичных сквозных путей. Если проект уже перекошен в сторону E2E —
-  отметь это как риск плана.
-- Укажи для каждого уровня используемый в проекте фреймворк (определённый на
-  шаге SCOPE), а не абстрактно.
+**1. Test levels (the test pyramid)**
+- Distribute the checks across levels: **unit** (isolated logic, branching,
+  boundary values), **integration** (module+DB/queue/cache, contracts between
+  layers), **API/contract** (endpoints, request/response schemas, error codes),
+  **E2E** (end-to-end user scenarios via UI/public API),
+  **manual/exploratory** (things that are expensive/pointless to automate:
+  layout, usability, exploratory testing).
+- Justify the balance: the bulk on the cheap lower levels, E2E only for critical
+  end-to-end paths. If the project is already skewed toward E2E — note that as a
+  risk of the plan.
+- Specify for each level the framework used in the project (detected at the
+  SCOPE step), not abstractly.
 
-**2. Типы тестирования (какие применимы)**
-- **Функциональное** — проверка бизнес-правил и acceptance criteria.
-- **Регрессионное** — что из уже работающего может сломаться; определи
-  регрессионный набор для смежных модулей (по зависимостям из SCOPE).
-- **Нефункциональное** — включай только применимое, для каждого укажи, есть
-  ли измеримое требование (иначе тестировать нечего, см. `requirements-review`):
-  - производительность/нагрузка (если есть SLA/целевые числа) — инструмент по
-    проекту (k6/JMeter/Locust/Gatling);
-  - безопасность (если фича трогает auth/данные/интеграции) — сослаться на
-    `security-audit-feature`, не дублировать;
-  - доступность (a11y/WCAG) — если есть UI и требование по уровню;
-  - совместимость (браузеры/ОС/устройства/разрешения) — если есть матрица
-    поддержки;
-  - локализация/интернационализация — если несколько языков/локалей;
-  - совместимость данных / обратная совместимость API — при миграциях/
-    изменении контрактов.
-- Явно перечисли типы, которые НЕ применимы к этому периметру, чтобы было
-  видно, что решение осознанное.
+**2. Testing types (which are applicable)**
+- **Functional** — verification of business rules and acceptance criteria.
+- **Regression** — what of the already-working functionality might break;
+  determine the regression set for the adjacent modules (by the dependencies
+  from SCOPE).
+- **Non-functional** — include only the applicable ones; for each, state whether
+  there is a measurable requirement (otherwise there is nothing to test, see
+  `requirements-review`):
+  - performance/load (if there is an SLA/target numbers) — tool per the project
+    (k6/JMeter/Locust/Gatling);
+  - security (if the feature touches auth/data/integrations) — refer to
+    `security-audit-feature`, do not duplicate;
+  - accessibility (a11y/WCAG) — if there is UI and a requirement on the level;
+  - compatibility (browsers/OS/devices/resolutions) — if there is a support
+    matrix;
+  - localization/internationalization — if there are several languages/locales;
+  - data compatibility / API backward compatibility — on migrations/contract
+    changes.
+- Explicitly list the types that are NOT applicable to this perimeter, so that
+  it is visible that the decision was deliberate.
 
-**3. Risk-based приоритизация областей**
-- Для каждой области: вероятность дефекта (сложность, новизна, частота
-  изменений/churn, текущее покрытие тестами) × влияние (критичность для
-  бизнеса, число пользователей, обратимость, деньги/данные/безопасность).
-- Присвой уровень риска и глубину тестирования:
-  **exhaustive** (все классы эквивалентности, границы, негативные пути,
-  таблицы решений) / **нормальное** (happy path + ключевые негативные) /
-  **smoke** (базовая работоспособность) / **сознательно пропускаем**
-  (с обоснованием и фиксацией остаточного риска).
-- Для глубокого разбора рисков передай эстафету скиллу `risk-analysis`; здесь
-  дай итоговую таблицу «область → риск → глубина».
+**3. Risk-based prioritization of areas**
+- For each area: defect probability (complexity, novelty, change frequency/
+  churn, current test coverage) × impact (business criticality, number of users,
+  reversibility, money/data/security).
+- Assign a risk level and testing depth:
+  **exhaustive** (all equivalence classes, boundaries, negative paths, decision
+  tables) / **normal** (happy path + key negative) / **smoke** (basic
+  operability) / **deliberately skipped** (with justification and residual risk
+  recorded).
+- For a deep risk analysis, hand off to the `risk-analysis` skill; here give the
+  final "area → risk → depth" table.
 
-**4. Тестовые окружения и данные**
-- На каком окружении гоняется каждый уровень (локально/CI/staging), какие
-  сервисы должны быть подняты, что мокается/стабится (внешние платёжки, SMS,
-  сторонние API).
-- Тестовые данные: откуда берутся (фикстуры/фабрики/сид-скрипты/анонимизиро-
-  ванный дамп), нужны ли специальные аккаунты/роли/тенанты, как чистятся
-  между прогонами. Если данные содержат PII — только анонимизированные.
-- Флаги фич: в каком положении тестируется (вкл/выкл/оба).
+**4. Test environments and data**
+- On which environment each level runs (local/CI/staging), which services must
+  be up, what is mocked/stubbed (external payment providers, SMS, third-party
+  APIs).
+- Test data: where it comes from (fixtures/factories/seed scripts/anonymized
+  dump), whether special accounts/roles/tenants are needed, how it is cleaned up
+  between runs. If the data contains PII — anonymized only.
+- Feature flags: in which position it is tested (on/off/both).
 
-**5. Entry / Exit-критерии (DoD тестирования)**
-- **Entry** (когда можно НАЧИНАТЬ): код смержен в тест-ветку, сборка зелёная,
-  окружение поднято, тестовые данные готовы, требования зафиксированы.
-- **Exit** (когда тестирование ЗАВЕРШЕНО): задай числами — например «все
-  P1/P2 кейсы пройдены», «0 открытых Critical/High багов», «покрытие
-  требований 100% для critical-областей», «падения автотестов = 0 (flaky
-  расследованы)». Без чисел exit-критерий бесполезен.
+**5. Entry / Exit criteria (Definition of Done for testing)**
+- **Entry** (when it CAN START): the code is merged into the test branch, the
+  build is green, the environment is up, the test data is ready, the
+  requirements are frozen.
+- **Exit** (when testing is COMPLETE): set as numbers — for example "all P1/P2
+  cases passed", "0 open Critical/High bugs", "requirements coverage 100% for
+  critical areas", "automated-test failures = 0 (flaky investigated)". Without
+  numbers, an exit criterion is useless.
 
-**6. Метрики**
-- Покрытие требований (сколько требований имеют хотя бы один кейс),
-  при возможности — покрытие кода для юнитов.
-- Плотность дефектов по областям (найденные баги / размер области) — где
-  концентрируются дефекты, туда добавить глубины.
-- Прогресс: выполнено/осталось кейсов, pass rate, число открытых дефектов по
-  severity, flaky rate автотестов.
+**6. Metrics**
+- Requirements coverage (how many requirements have at least one case), and
+  where possible — code coverage for the unit tests.
+- Defect density by area (bugs found / area size) — where defects concentrate,
+  add depth there.
+- Progress: cases done/remaining, pass rate, number of open defects by severity,
+  automated-test flaky rate.
 
-**7. Роли, ответственность, этапы, расписание**
-- Кто пишет/гоняет какие уровни (разработчики — unit/integration; QA —
-  E2E/manual/exploratory), кто принимает решение о релизе по exit-критериям.
-- Этапы и их порядок: smoke → функциональное по областям (в порядке
-  убывания риска) → регрессия смежного → нефункциональное → приёмка. Привяжи
-  к вехам релиза, если они заданы.
+**7. Roles, responsibility, phases, schedule**
+- Who writes/runs which levels (developers — unit/integration; QA —
+  E2E/manual/exploratory), who makes the release decision by the exit criteria.
+- Phases and their order: smoke → functional by area (in decreasing order of
+  risk) → adjacent-module regression → non-functional → acceptance. Tie it to
+  the release milestones, if they are set.
 
-**8. Риски самого тестирования и зависимости**
-- Риски процесса тестирования и митигация: нестабильное окружение,
-  недоступность внешних сервисов (нужны стабы), flaky-тесты, нехватка
-  тестовых данных/аккаунтов, сжатые сроки (тогда — что режем первым по
-  risk-based), знание домена.
-- Зависимости-блокеры: доступы (VPN/учётки/секреты тестовых интеграций),
-  готовность смежных команд/сервисов, тестовые лицензии, поднятые стабы
-  внешних систем. Каждая зависимость — с владельцем и сроком.
+**8. Risks of the testing itself and dependencies**
+- Risks of the testing process and their mitigation: unstable environment,
+  unavailability of external services (stubs needed), flaky tests, shortage of
+  test data/accounts, tight deadlines (then — what gets cut first per
+  risk-based), domain knowledge.
+- Blocker dependencies: access (VPN/accounts/secrets of test integrations),
+  readiness of adjacent teams/services, test licenses, stubs of external systems
+  being up. Each dependency — with an owner and a deadline.
 
-## EDGE CASES ПЛАНИРОВАНИЯ, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ
+## PLANNING EDGE CASES OFTEN MISSED
 
-- Регрессия смежных модулей: план покрывает саму фичу, но забывает то, что
-  она косвенно меняет (общий компонент, разделяемая таблица, общий middleware).
-- Стыки фич в релизе: каждая фича работает по отдельности, но их взаимодействие
-  не запланировано к проверке.
-- Миграции данных и обратная совместимость: план тестирует новое поведение,
-  но не проверяет уже существующие записи/старых клиентов после миграции.
-- Откат (rollback): не запланирован сценарий отката релиза и его последствий
-  для данных.
-- Тестовые данные для негативных путей: их сложнее готовить, поэтому негативные
-  ветки «выпадают» из плана.
-- Нефункциональное без измеримого требования: план обещает «проверить
-  производительность», но целевого числа нет — тестировать не по чему
-  (заведи вопрос в требования).
-- Окружение отличается от прод (данные/масштаб/конфиг флагов) — часть дефектов
-  не воспроизводится; отметь как ограничение.
-- Мокнутые внешние сервисы скрывают реальные контрактные расхождения — запланируй
-  хотя бы контрактные/периодические реальные прогоны.
-- Конкурентность и многотенантность: планируются как «функционал», хотя требуют
-  отдельных сценариев (гонки, изоляция данных между тенантами).
-- Локали, часовые пояса, форматы дат/чисел выпадают, если тестовое окружение
-  в одной локали.
-- Flaky-тесты, принятые как «иногда падают»: без плана их расследования exit-
-  критерий по автотестам недостижим.
-- Доступность и клавиатурная навигация: откладываются «на потом» и не попадают
-  в план вовсе.
+- Regression of adjacent modules: the plan covers the feature itself but forgets
+  what it indirectly changes (a shared component, a shared table, a shared
+  middleware).
+- Feature seams in a release: each feature works on its own, but their
+  interaction is not planned for verification.
+- Data migrations and backward compatibility: the plan tests the new behavior
+  but does not check the already-existing records/old clients after the
+  migration.
+- Rollback: no scenario planned for rolling back the release and its consequences
+  for the data.
+- Test data for negative paths: it is harder to prepare, so the negative branches
+  "fall out" of the plan.
+- Non-functional without a measurable requirement: the plan promises to "check
+  performance", but there is no target number — there is nothing to test against
+  (raise a question in the requirements).
+- The environment differs from prod (data/scale/flag config) — some defects do
+  not reproduce; note it as a limitation.
+- Mocked external services hide real contract divergences — plan at least
+  contract/periodic real runs.
+- Concurrency and multi-tenancy: planned as "functionality", though they require
+  separate scenarios (races, data isolation between tenants).
+- Locales, time zones, date/number formats fall out if the test environment is in
+  a single locale.
+- Flaky tests accepted as "they fail sometimes": without a plan to investigate
+  them, the exit criterion on automated tests is unreachable.
+- Accessibility and keyboard navigation: deferred "for later" and do not make it
+  into the plan at all.
 
-## КРИТЕРИИ КАЧЕСТВА ПЛАНА (DoD самого тест-плана)
+## PLAN QUALITY CRITERIA (Definition of Done for the test plan itself)
 
-План считается готовым, если:
-- SCOPE и OUT-OF-SCOPE заданы явно;
-- каждая область имеет уровень риска и назначенную глубину;
-- каждый тип проверки привязан к уровню пирамиды и к инструменту проекта;
-- exit-критерии заданы числами;
-- перечислены окружения, данные, зависимости-блокеры с владельцами;
-- есть трассировка требование → область → уровень (хотя бы таблицей);
-- явно назван остаточный риск того, что решено не тестировать.
+The plan is considered ready if:
+- the SCOPE and OUT-OF-SCOPE are stated explicitly;
+- each area has a risk level and an assigned depth;
+- each type of check is tied to a pyramid level and to a project tool;
+- the exit criteria are set as numbers;
+- the environments, data, and blocker dependencies with owners are listed;
+- there is a requirement → area → level traceability (at least as a table);
+- the residual risk of what was decided not to test is named explicitly.
 
-## ФОРМАТ ПЛАНА / АРТЕФАКТ
+## PLAN FORMAT / ARTIFACT
 
-Сохрани в `docs/qa/test-plans/<scope-slug>.md` (slug — по имени фичи/релиза/
-issue-ID). Сначала проверь конвенцию репозитория; `docs/qa/...` — дефолт.
-Если план по этому периметру уже существует — обнови его, а не создавай второй.
+Save it to `docs/qa/test-plans/<scope-slug>.md` (slug — by the feature/release/
+issue-ID name). First check the repository convention; `docs/qa/...` is the
+default. If a plan for this perimeter already exists — update it rather than
+creating a second one.
 
-Структура:
-1. **Executive summary** — что тестируем, какой объём, где главные риски,
-   сколько усилий и в каком порядке, ключевые блокеры-зависимости.
-2. **SCOPE и OUT-OF-SCOPE** — что в объёме, что сознательно вне и почему
-   (остаточный риск).
-3. **Области тестирования и risk-based приоритизация** — таблица
-   `область | риск | глубина (exhaustive/normal/smoke/skip) | обоснование`.
-4. **Уровни тестирования** — распределение по пирамиде + фреймворк проекта на
-   каждом уровне.
-5. **Типы тестирования** — применимые (с деталями) и неприменимые (с
-   пометкой почему).
-6. **Окружения и тестовые данные** — где, что поднято/замокано, откуда данные.
-7. **Entry / Exit-критерии** — с числами.
-8. **Метрики** — что и как измеряем.
-9. **Роли, этапы, расписание** — кто что делает и в каком порядке.
-10. **Риски тестирования и зависимости** — с митигацией и владельцами.
-11. **Трассировка требование → область → уровень** (таблица), если есть
-    требования.
-12. **Что НЕ покрыто планом / ограничения** — честный список того, что
-    осталось за рамками (нет прод-подобного окружения, нет измеримых NFR, нет
-    доступа к внешним системам и т.п.).
+Structure:
+1. **Executive summary** — what we test, what the scope is, where the main risks
+   are, how much effort and in what order, the key blocker dependencies.
+2. **SCOPE and OUT-OF-SCOPE** — what is in scope, what is deliberately out and
+   why (residual risk).
+3. **Test areas and risk-based prioritization** — a table
+   `area | risk | depth (exhaustive/normal/smoke/skip) | justification`.
+4. **Test levels** — the distribution across the pyramid + the project framework
+   at each level.
+5. **Testing types** — the applicable ones (with details) and the inapplicable
+   ones (with a note why).
+6. **Environments and test data** — where, what is up/mocked, where the data
+   comes from.
+7. **Entry / Exit criteria** — with numbers.
+8. **Metrics** — what and how we measure.
+9. **Roles, phases, schedule** — who does what and in what order.
+10. **Testing risks and dependencies** — with mitigation and owners.
+11. **Requirement → area → level traceability** (a table), if there are
+    requirements.
+12. **What the plan does NOT cover / limitations** — an honest list of what was
+    left out (no prod-like environment, no measurable NFRs, no access to external
+    systems, etc.).
 
-## ПРАВИЛА ОФОРМЛЕНИЯ
+## FORMATTING RULES
 
-- Ссылайся на реальные пути/модули проекта (`file`/директория) и на конкретные
-  требования/тикеты, а не на абстракции.
-- Глубину и уровень риска подкрепляй причиной (сложность/новизна/churn/
-  влияние), а не назначай произвольно.
-- Не дублируй методики соседних скиллов: детальный risk-разбор — в
-  `risk-analysis`, ревью самих требований — в `requirements-review`,
-  безопасность — в `security-audit-feature`; в плане на них ссылайся.
+- Refer to real project paths/modules (`file`/directory) and to concrete
+  requirements/tickets, not to abstractions.
+- Back up depth and risk level with a reason (complexity/novelty/churn/impact),
+  do not assign them arbitrarily.
+- Do not duplicate the methods of neighboring skills: the detailed risk analysis
+  belongs in `risk-analysis`, the review of the requirements themselves in
+  `requirements-review`, security in `security-audit-feature`; refer to them from
+  the plan.
 
-## ЗАПУСК (практическая инструкция)
+## LAUNCH (practical instructions)
 
-1. **Сам, в основном потоке**, выполни раздел «Входные данные»: определи вид
-   входа, восстанови фактический объём (для фичи — по git diff/коду/
-   требованиям), определи стек и тестовые фреймворки проекта. Не делегируй —
-   субагент не знает контекста «какую фичу/релиз планируем». Зафиксируй SCOPE
-   и OUT-OF-SCOPE.
-2. Проверь, нет ли уже плана по этому периметру в `docs/qa/test-plans/` —
-   обнови существующий.
-3. Разложи периметр на области. Если периметр большой (релиз из многих фич /
-   весь проект) и доступен Agent tool — раздели области между субагентами:
-   каждый прорабатывает свою группу (уровни, типы, риск, данные для неё).
-   Передавай субагенту конкретные пути/требования его области, релевантные
-   блоки чек-листа, шкалу глубины и формат — он не видит этот файл и общий
-   контекст. Промежуточные наработки складывай в файл.
-4. Сам собери из областей единый план: согласуй уровни риска между областями
-   (чтобы шкала была общей), добавь стыки/регрессию между фичами (их субагент
-   по одной области не увидит), определи глобальные окружения/данные/критерии/
-   роли/этапы.
-5. Сохрани план по формату выше и явно перечисли, что осталось за рамками.
+1. **Yourself, in the main thread**, carry out the "Input" section: determine
+   the input type, reconstruct the actual scope (for a feature — from git
+   diff/code/requirements), detect the project's stack and test frameworks. Do
+   not delegate — a subagent does not know the context of "which feature/release
+   we are planning". Record the SCOPE and OUT-OF-SCOPE.
+2. Check whether a plan for this perimeter already exists in
+   `docs/qa/test-plans/` — update the existing one.
+3. Break the perimeter into areas. If the perimeter is large (a release of many
+   features / the whole project) and the Agent tool is available — split the
+   areas among subagents: each works through its own group (levels, types, risk,
+   data for it). Pass the subagent the concrete paths/requirements of its area,
+   the relevant checklist blocks, the depth scale, and the format — it does not
+   see this file or the overall context. Accumulate interim work into a file.
+4. Yourself, assemble a single plan from the areas: reconcile the risk levels
+   across areas (so the scale is shared), add the seams/regression between
+   features (a single-area subagent will not see them), determine the global
+   environments/data/criteria/roles/phases.
+5. Save the plan in the format above and explicitly list what was left out.
 
-Это планирование тестирования, а не его исполнение и не написание кейсов:
-конкретные тест-кейсы и автотесты создаются отдельно по этому плану. План
-должен быть таким, чтобы по нему могла работать вся команда, а не только его
-автор.
+This is the planning of testing, not its execution and not the writing of cases:
+the concrete test cases and automated tests are created separately from this
+plan. The plan should be such that the whole team can work from it, not just its
+author.
+

@@ -1,261 +1,275 @@
 ---
 name: flaky-test-triage
-description: Диагностирует и устраняет нестабильные (flaky) тесты — те, что то падают, то проходят без изменений кода. Определяет тест-раннер проекта, эмпирически подтверждает нестабильность многократным прогоном (повтор, рандомизация порядка, параллель), классифицирует первопричину каждого (race condition/асинхронность, shared state/зависимость от порядка, время/таймзоны, внешние зависимости, недетерминированные данные, ресурсы/тайминги, зависимость от окружения) и чинит ПО ПРИЧИНЕ, а не прячет за retry/skip, затем перепрогоняет N раз и доказывает стабильность. Используй когда просят «тест то падает то проходит», «почини flaky тесты», «нестабильные тесты в CI», «тесты падают рандомно», «убери мигание тестов», «почему тест нестабилен», «тест зелёный локально, но красный в CI» — даже без слова «flaky». Это АВТОРСКИЙ скилл: он правит и запускает код тестов, а не только диагностирует.
-argument-hint: "[имя теста/файла, путь к упавшему CI-логу, или тестовый набор; всё опционально — если пусто, уточню, какие тесты нестабильны]"
+description: Diagnoses and eliminates flaky tests — the ones that fail sometimes and pass others with no code change. Detects the project's test runner, empirically confirms the instability by running many times (repeat, order randomization, parallelism), classifies the root cause of each (race condition/async, shared state/order dependence, time/timezones, external dependencies, nondeterministic data, resources/timing, environment dependence) and fixes BY THE CAUSE rather than hiding it behind retry/skip, then reruns N times and proves stability. Use when asked "a test fails sometimes and passes others", "fix the flaky tests", "unstable tests in CI", "tests fail randomly", "get rid of the test flicker", "why is this test unstable", "the test is green locally but red in CI" — even without the word "flaky". This is an AUTHORING skill: it edits and runs test code, it does not just diagnose.
+argument-hint: "[test/file name, path to a failed CI log, or a test suite; all optional — if empty, I'll ask which tests are unstable]"
 ---
 
-# Триаж и устранение нестабильных тестов (flaky test triage)
+# Flaky test triage and remediation
 
-Ты — инженер по тестовой инфраструктуре. Flaky-тест хуже упавшего: он
-подрывает доверие ко всему набору, маскирует реальные регрессии и приучает
-команду перезапускать CI вслепую. Твоя задача — не «сделать зелёным любой
-ценой» (retry/skip это скрывают, но не решают), а найти и устранить
-первопричину недетерминированности, доказав фактом: до фикса тест мигает,
-после — стабилен на N прогонах.
+You are a test infrastructure engineer. A flaky test is worse than a failing
+one: it undermines trust in the entire suite, masks real regressions, and
+trains the team to re-run CI blindly. Your job is not to "make it green at any
+cost" (retry/skip hide the problem but do not solve it), but to find and
+eliminate the root cause of nondeterminism, proving it with evidence: before
+the fix the test flickers, after it the test is stable across N runs.
 
-Дисциплина — evidence over assertion: нестабильность подтверждается
-эмпирически (многократный прогон с воспроизведением падения), первопричина —
-конкретным механизмом в коде (file:line), а фикс — повторным прогоном без
-единого падения. «Похоже, это race» без воспроизведения — не диагноз.
+The discipline is evidence over assertion: instability is confirmed
+empirically (many runs that reproduce the failure), the root cause by a
+concrete mechanism in the code (file:line), and the fix by a repeat run with
+zero failures. "Looks like a race" without a reproduction is not a diagnosis.
 
-Работай в конвенции проекта: сначала определи тест-раннер и его средства
-повтора/рандомизации, чини в стиле существующих тестов. Если нестабильных
-тестов много, разбей на зоны и делегируй субагентам через Agent tool.
+Work in the project's conventions: first detect the test runner and its
+repeat/randomization facilities, and fix in the style of the existing tests.
+If there are many flaky tests, split them into zones and delegate to subagents
+via the Agent tool.
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (как определить периметр)
+## INPUT / SCOPE (how to determine the perimeter)
 
-Периметр: `$ARGUMENTS`
+Perimeter: `$ARGUMENTS`
 
-Вход может прийти в одном из видов:
+The input may arrive in one of several forms:
 
-- **A. КОНКРЕТНЫЙ ТЕСТ / ФАЙЛ / НАБОР** (имя теста, путь к файлу, директория,
-  ветка/diff) — периметр = сам тест плюс всё, от чего он зависит по состоянию:
-  общие фикстуры/setup-teardown, разделяемые ресурсы (модульные/глобальные
-  переменные, singletons, БД, временные файлы), другие тесты в том же файле/
-  классе (они могли оставить состояние). Периметр flaky ВСЕГДА шире одного
-  теста: причина часто в соседе.
-- **B. CI-ЛОГ упавшего прогона** (путь к файлу лога / вставленный текст) —
-  извлеки из него: имя(имена) упавших тестов, тип ошибки (assertion,
-  timeout, connection refused, KeyError и т.п.), seed/порядок прогона (если
-  раннер его печатает), окружение (образ, версия рантайма, параллелизм).
-  По имени теста найди его в коде и построй периметр как в п. A. Сопоставь:
-  та же ошибка воспроизводится локально или только в CI (см. edge cases про
-  dev vs CI).
-- **C. ISSUE в трекере** (ID/ссылка) — получи текст через доступную
-  интеграцию (MCP, если подключён; иначе запроси у пользователя). Найди
-  упомянутые тесты и связанные коммиты (`git log --all --grep=<ID>`).
+- **A. A SPECIFIC TEST / FILE / SUITE** (test name, file path, directory,
+  branch/diff) — the perimeter = the test itself plus everything it depends on
+  by state: shared fixtures/setup-teardown, shared resources (module/global
+  variables, singletons, DB, temp files), other tests in the same file/class
+  (they may have left state behind). The flaky perimeter is ALWAYS wider than a
+  single test: the cause is often in a neighbor.
+- **B. A CI LOG from a failed run** (path to a log file / pasted text) —
+  extract from it: the name(s) of the failed tests, the error type (assertion,
+  timeout, connection refused, KeyError, etc.), the seed/run order (if the
+  runner prints it), the environment (image, runtime version, parallelism).
+  By the test name, locate it in the code and build the perimeter as in item A.
+  Correlate: does the same error reproduce locally or only in CI (see edge
+  cases about dev vs CI).
+- **C. A TRACKER ISSUE** (ID/link) — fetch the text via an available
+  integration (MCP, if connected; otherwise ask the user). Find the mentioned
+  tests and related commits (`git log --all --grep=<ID>`).
 
-Если непонятно, какие именно тесты нестабильны — остановись и уточни
-(попроси имя теста или CI-лог), не перепрогоняй весь набор в надежде что-то
-поймать (хотя массовый прогон с рандомизацией — валидный способ ВЫЯВИТЬ flaky,
-если пользователь именно об этом просит). Зафиксируй SCOPE в начале отчёта.
+If it is unclear which tests are unstable, stop and clarify (ask for a test
+name or a CI log); do not re-run the whole suite hoping to catch something
+(though a mass run with randomization IS a valid way to SURFACE flaky tests if
+that is exactly what the user asks for). Record the SCOPE at the start of the
+report.
 
-## КЛЮЧЕВОЙ ПРИНЦИП: ЧИНИ ПРИЧИНУ, НЕ ПРЯЧЬ СИМПТОМ
+## KEY PRINCIPLE: FIX THE CAUSE, DON'T HIDE THE SYMPTOM
 
-1. **Сначала воспроизведи, потом чини.** Пока падение не воспроизведено, у
-   тебя нет ни диагноза, ни способа проверить фикс. Однократный зелёный
-   прогон ничего не доказывает.
-2. **retry и skip — не решения.** `@pytest.mark.flaky`, `jest.retryTimes`,
-   `--reruns`, `@Retry`, `test.skip` прячут проблему: тест по-прежнему
-   недетерминирован, реальные регрессии по-прежнему замаскированы. Retry
-   допустим ТОЛЬКО как явно помеченная временная мера для того, что нельзя
-   починить сейчас (см. quarantine ниже), с заведённым тикетом, а не как фикс.
-3. **Не «подгоняй» под текущее.** Увеличить sleep, ослабить ассерт до
-   бессмысленного, поднять таймаут «чтоб проходило» — это маскировка. Sleep
-   заменяется явным ожиданием условия, а не удлиняется.
-4. **Один тест — одна причина (обычно).** Не сваливай в кучу: у каждого
-   flaky-теста может быть своя первопричина. Диагностируй по отдельности.
-5. **Докажи стабильность после фикса.** Перепрогони фикс N раз (десятки), с
-   рандомизацией порядка и в параллели — столько же, сколько понадобилось для
-   воспроизведения, а лучше больше.
+1. **Reproduce first, fix second.** Until the failure is reproduced you have
+   neither a diagnosis nor a way to verify a fix. A single green run proves
+   nothing.
+2. **retry and skip are not solutions.** `@pytest.mark.flaky`,
+   `jest.retryTimes`, `--reruns`, `@Retry`, `test.skip` hide the problem: the
+   test is still nondeterministic, real regressions are still masked. Retry is
+   acceptable ONLY as an explicitly flagged temporary measure for something
+   that cannot be fixed right now (see quarantine below), with a filed ticket,
+   never as a fix.
+3. **Do not "tune" the test to the current run.** Bumping a sleep, weakening an
+   assert into meaninglessness, raising a timeout "so it passes" — this is
+   masking. A sleep is replaced by an explicit wait for a condition, not made
+   longer.
+4. **One test — one cause (usually).** Do not lump them together: each flaky
+   test may have its own root cause. Diagnose them individually.
+5. **Prove stability after the fix.** Re-run the fix N times (dozens), with
+   order randomization and in parallel — at least as many times as it took to
+   reproduce, ideally more.
 
-## МЕТОДОЛОГИЯ (пайплайн)
+## METHODOLOGY (the pipeline)
 
-1. **Определи тест-раннер и его средства повтора/рандомизации:**
+1. **Detect the test runner and its repeat/randomization facilities:**
    - Python `pytest`: `pytest --count=N` (pytest-repeat), `-p no:randomly`/
-     `pytest-randomly` (рандомизация порядка + фиксация seed), `-x` (стоп на
-     первом падении), `-n auto` (pytest-xdist, параллель), `-p flaky`/
-     `pytest-rerunfailures` (для ДИАГНОСТИКИ, не для фикса).
-   - JS `jest`/`vitest`: запуск в цикле, `--runInBand` vs параллель,
-     `--shuffle` (vitest), `testSequencer` (jest); фиксация seed ГСЧ.
+     `pytest-randomly` (order randomization + seed pinning), `-x` (stop on
+     first failure), `-n auto` (pytest-xdist, parallel), `-p flaky`/
+     `pytest-rerunfailures` (for DIAGNOSIS, not for the fix).
+   - JS `jest`/`vitest`: run in a loop, `--runInBand` vs parallel,
+     `--shuffle` (vitest), `testSequencer` (jest); pinning the RNG seed.
    - Go: `go test -count=N -race -shuffle=on`.
-   - JVM/JUnit: повтор через `@RepeatedTest`, surefire `rerunFailingTests`
-     (диагностика), `-Dsurefire.runOrder=random`.
-   - Определи, как раннер печатает seed/порядок — он нужен для
-     воспроизведения конкретного падения.
-2. **Воспроизведи нестабильность эмпирически.** Прогони подозрительный
-   тест/набор много раз (например 20–50, при быстрых тестах больше),
-   комбинируя: (а) повтор в одном процессе, (б) рандомизацию порядка с разными
-   seed, (в) параллельный прогон (`-n`, `--runInBand` off). Зафиксируй
-   частоту падений (например «7/50») и точный режим, в котором падает, —
-   это опорная точка.
-3. **Собери улику падения.** Для каждого падения: тип и текст ошибки,
-   stack trace, seed/порядок, отличается ли поведение изолированно
-   (`тест один`) от «в наборе». Ключевой дифференцирующий вопрос: падает ли
-   тест **в изоляции** — если да, причина внутри самого теста (время, ГСЧ,
-   гонка); если только **в наборе/в определённом порядке** — причина в
-   разделяемом состоянии/зависимости от порядка.
-4. **Классифицируй первопричину** (см. каталог ниже). Подтверди механизмом в
-   коде (file:line), а не догадкой. При необходимости добавь временную
-   диагностику (лог seed, лог порядка, лог состояния разделяемого ресурса).
-5. **Почини по первопричине** (см. каталог — для каждого класса свой рецепт).
-   Меняй тест (или, если баг реальный, — продуктовый код, но это уже находка,
-   а не flaky), сохраняя ЧТО он проверяет.
-6. **Верифицируй фикс.** Перепрогони N раз в том же режиме, что воспроизводил
-   падение (тот же параллелизм, рандомизация порядка, диапазон seed). Критерий:
-   ноль падений на прогоне, сопоставимом или большем по объёму. Приложи вывод.
-7. **Зафиксируй остаточное.** Что не удалось стабилизировать сейчас → в
-   quarantine с тикетом (см. ниже), а не молчком в retry.
+   - JVM/JUnit: repeat via `@RepeatedTest`, surefire `rerunFailingTests`
+     (diagnosis), `-Dsurefire.runOrder=random`.
+   - Determine how the runner prints the seed/order — you need it to reproduce
+     a specific failure.
+2. **Reproduce the instability empirically.** Run the suspect test/suite many
+   times (e.g. 20–50, more for fast tests), combining: (a) repeat within a
+   single process, (b) order randomization with different seeds, (c) a parallel
+   run (`-n`, `--runInBand` off). Record the failure frequency (e.g. "7/50")
+   and the exact mode in which it fails — this is your baseline.
+3. **Gather the failure evidence.** For each failure: the error type and text,
+   stack trace, seed/order, whether the behavior differs in isolation (`test
+   alone`) from "within the suite". The key differentiating question is whether
+   the test fails **in isolation** — if yes, the cause is inside the test
+   itself (time, RNG, race); if only **within the suite/in a certain order**,
+   the cause is in shared state/order dependence.
+4. **Classify the root cause** (see the catalog below). Confirm it with a
+   mechanism in the code (file:line), not a guess. If needed, add temporary
+   diagnostics (log the seed, log the order, log the state of the shared
+   resource).
+5. **Fix by the root cause** (see the catalog — each class has its own recipe).
+   Change the test (or, if the bug is real, the product code — but that is now
+   a finding, not flakiness), preserving WHAT it checks.
+6. **Verify the fix.** Re-run N times in the same mode that reproduced the
+   failure (same parallelism, order randomization, seed range). Criterion: zero
+   failures over a run comparable to or larger than before. Attach the output.
+7. **Record what remains.** Whatever cannot be stabilized now → into quarantine
+   with a ticket (see below), not silently into a retry.
 
-## КАТАЛОГ ПЕРВОПРИЧИН И РЕЦЕПТЫ ФИКСА
+## CATALOG OF ROOT CAUSES AND FIX RECIPES
 
-1. **Race condition / асинхронность (нет ожидания)**
-   - Симптом: падает под параллелью или «иногда», ошибка вида «элемент не
-     найден / значение ещё не обновилось». Тест продолжает до того, как
-     асинхронная операция завершилась.
-   - Фикс: замени фиксированный `sleep`/произвольный таймаут на **явное
-     ожидание условия** (poll до предиката, `waitFor`/`await expect(...)`,
-     Playwright/Selenium explicit waits, `await` конкретного промиса/future).
-     Дожидайся именно нужного состояния, а не «подождём секунду».
-2. **Зависимость от порядка / общее состояние (shared state)**
-   - Симптом: падает только при определённом порядке / только «в наборе»,
-     проходит в изоляции. Тесты делят глобальные/модульные переменные,
-     singleton, кэш, БД, файлы, переменные окружения, замоканные модули.
-   - Фикс: **изолируй состояние** — setup/teardown или фикстуры с
-     очисткой/откатом (транзакция с rollback, свежая БД/схема на тест,
-     `beforeEach` сброс, отдельная temp-директория, восстановление env/моков
-     в teardown). Сделай тесты независимыми от порядка (проверь
-     рандомизацией). Не полагайся на побочный эффект соседнего теста.
-3. **Время / таймзоны / часы**
-   - Симптом: падает у полуночи, в конце месяца, в другой TZ, «через N дней»,
-     на границе DST; hardcoded ожидание `now()`; sleep-таймауты под нагрузкой.
-   - Фикс: **замокай время** (freezegun/`time.monotonic` инъекция,
-     `jest.useFakeTimers`, `@Clock`/инъекция `Clock`, `sinon.useFakeTimers`).
-     Не сравнивай с реальным `now()`, фиксируй таймзону в тесте, убери гонки
-     на sleep-таймаутах в пользу явного ожидания.
-4. **Внешние зависимости (сеть, реальные API, БД без изоляции, очередь)**
-   - Симптом: `connection refused`, таймаут, зависит от доступности внешнего
-     сервиса, от данных в общей БД, от порядка сообщений в очереди.
-   - Фикс: **замокай/застабь внешнюю границу** (HTTP-моки: responses/nock/
-     WireMock/MSW; тест-контейнеры или in-memory для БД; изоляция БД
-     транзакцией). Unit-тест не должен ходить в реальную сеть. Если это
-     интеграционный тест по замыслу — обеспечь детерминированное окружение
-     (фиксированный сид данных, изоляция схемы), а не «как повезёт».
-5. **Недетерминированные данные**
-   - Симптом: `random` без seed; зависимость от порядка обхода множества/
-     словаря/хэша; UUID/timestamp в ассерте; локаль-зависимая сортировка/
-     форматирование; параллельная генерация ID.
-   - Фикс: **зафиксируй seed** ГСЧ; не полагайся на порядок неупорядоченных
-     коллекций (сортируй перед сравнением или сравнивай как множества);
-     не ассерть сгенерированные UUID/время буквально (проверяй формат/факт
-     наличия); фиксируй локаль.
-6. **Ресурсные лимиты / тайминги**
-   - Симптом: падает под нагрузкой/на слабом CI-раннере, таймаут слишком
-     тесный, порт/файл занят, утечка соединений/дескрипторов между тестами.
-   - Фикс: убери жёсткие тайминговые ассерты («выполнилось за <100мс») из
-     функциональных тестов; корректно освобождай ресурсы в teardown;
-     используй случайный свободный порт/уникальное имя ресурса на тест.
-7. **Зависимость от окружения (локаль, TZ, разрешение экрана, dev vs CI)**
-   - Симптом: зелёный локально, красный в CI (или наоборот). Разные версии
-     рантайма, TZ, локаль, headless vs headed, число ядер (параллелизм),
-     переменные окружения.
-   - Фикс: сделай тест независимым от окружения (явно задай локаль/TZ,
-     детерминируй параллелизм, не завязывайся на пути/разрешение);
-     воспроизведи CI-условия локально (тот же образ/переменные), чтобы
-     поймать разницу.
+1. **Race condition / async (no wait)**
+   - Symptom: fails under parallelism or "sometimes", an error like "element
+     not found / value not updated yet". The test proceeds before the async
+     operation has completed.
+   - Fix: replace a fixed `sleep`/arbitrary timeout with an **explicit wait for
+     a condition** (poll until a predicate, `waitFor`/`await expect(...)`,
+     Playwright/Selenium explicit waits, `await` on a specific promise/future).
+     Wait for the exact state you need, not "let's wait a second".
+2. **Order dependence / shared state**
+   - Symptom: fails only in a certain order / only "within the suite", passes
+     in isolation. Tests share global/module variables, a singleton, a cache, a
+     DB, files, environment variables, mocked modules.
+   - Fix: **isolate the state** — setup/teardown or fixtures with
+     cleanup/rollback (a transaction with rollback, a fresh DB/schema per test,
+     `beforeEach` reset, a separate temp directory, restoring env/mocks in
+     teardown). Make the tests order-independent (verify with randomization).
+     Do not rely on a side effect of a neighboring test.
+3. **Time / timezones / clocks**
+   - Symptom: fails at midnight, at month-end, in another TZ, "N days later",
+     at a DST boundary; a hardcoded expectation of `now()`; sleep timeouts
+     under load.
+   - Fix: **mock time** (freezegun/`time.monotonic` injection,
+     `jest.useFakeTimers`, `@Clock`/`Clock` injection, `sinon.useFakeTimers`).
+     Do not compare against real `now()`, pin the timezone in the test, remove
+     races on sleep timeouts in favor of an explicit wait.
+4. **External dependencies (network, real APIs, DB without isolation, queue)**
+   - Symptom: `connection refused`, timeout, depends on the availability of an
+     external service, on data in a shared DB, on message order in a queue.
+   - Fix: **mock/stub the external boundary** (HTTP mocks: responses/nock/
+     WireMock/MSW; test containers or in-memory for the DB; DB isolation via a
+     transaction). A unit test must not hit the real network. If it is an
+     integration test by design, provide a deterministic environment (a fixed
+     data seed, schema isolation), not "whatever luck brings".
+5. **Nondeterministic data**
+   - Symptom: `random` without a seed; dependence on iteration order of a
+     set/dict/hash; a UUID/timestamp in an assert; locale-dependent
+     sorting/formatting; parallel ID generation.
+   - Fix: **pin the RNG seed**; do not rely on the order of unordered
+     collections (sort before comparing or compare as sets); do not assert
+     generated UUIDs/times literally (check the format/presence); pin the
+     locale.
+6. **Resource limits / timing**
+   - Symptom: fails under load / on a weak CI runner, a too-tight timeout, a
+     port/file already in use, a leak of connections/descriptors between tests.
+   - Fix: remove hard timing asserts ("completed in <100ms") from functional
+     tests; release resources properly in teardown; use a random free
+     port/unique resource name per test.
+7. **Environment dependence (locale, TZ, screen resolution, dev vs CI)**
+   - Symptom: green locally, red in CI (or vice versa). Different runtime
+     versions, TZ, locale, headless vs headed, core count (parallelism),
+     environment variables.
+   - Fix: make the test environment-independent (set the locale/TZ explicitly,
+     make parallelism deterministic, do not depend on paths/resolution);
+     reproduce the CI conditions locally (same image/variables) to catch the
+     difference.
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ
+## EDGE CASES THAT ARE OFTEN MISSED
 
-- **Причина — в соседнем тесте, а не в упавшем.** Падает тест B, но состояние
-  испортил тест A. Ищи виновника рандомизацией порядка и запуском B в изоляции.
-- **Общий мок/патч не откатан** — `patch`/`mock` из одного теста «протекает» в
-  следующий (особенно при patch глобального модуля без teardown).
-- **Кэш/мемоизация** (lru_cache, module-level singleton, ORM identity map) —
-  переносит состояние между тестами; нужен сброс.
-- **Автоинкрементные ID/последовательности БД** — тест ассертит `id == 1`, но
-  порядок прогона меняет счётчик.
-- **Порядок словаря/множества** — в некоторых рантаймах/версиях не гарантирован
-  или зависит от вставки; ассерт на порядок мигает.
-- **Часовые границы**: тест, зелёный днём, падает если прогон пересёк полночь/
-  смену суток/месяца между `now()` в setup и в проверке.
-- **Плавающая точность** — сравнение float через `==` вместо допуска.
-- **Асинхронный тест, который «проходит», не дождавшись промиса** — забытый
-  `await`/`return` промиса делает тест зелёным вне зависимости от результата
-  (ложный зелёный, тоже разновидность flaky).
-- **Параллелизм в CI ≠ локально** — локально `--runInBand`/1 воркер, в CI
-  много; гонки видны только в CI.
-- **Реальная сеть «обычно доступна»** — тест ходит в интернет и падает при
-  недоступности; это flaky, а не «инфраструктура моргнула».
-- **Таймаут, подобранный «впритык»** — проходит на быстрой машине, падает на
-  медленном раннере.
-- **Утечка порта/файла/соединения** между тестами → «address already in use».
-- **Ложноположительный фикс**: 10 зелёных прогонов при исходной частоте 1/50
-  ничего не доказывают — считай необходимое N от исходной частоты падений.
+- **The cause is in a neighboring test, not the failed one.** Test B fails, but
+  test A corrupted the state. Hunt the culprit with order randomization and by
+  running B in isolation.
+- **A shared mock/patch is not rolled back** — a `patch`/`mock` from one test
+  "leaks" into the next (especially when patching a global module without
+  teardown).
+- **Cache/memoization** (lru_cache, module-level singleton, ORM identity map) —
+  carries state between tests; a reset is needed.
+- **Auto-increment IDs/DB sequences** — the test asserts `id == 1`, but the run
+  order changes the counter.
+- **Dict/set order** — in some runtimes/versions it is not guaranteed or
+  depends on insertion; an assert on order flickers.
+- **Clock boundaries**: a test that is green during the day fails if the run
+  crossed midnight/a day/month boundary between `now()` in setup and in the
+  check.
+- **Floating-point precision** — comparing floats via `==` instead of a
+  tolerance.
+- **An async test that "passes" without awaiting the promise** — a forgotten
+  `await`/`return` of the promise makes the test green regardless of the result
+  (a false green, also a kind of flakiness).
+- **Parallelism in CI ≠ locally** — locally `--runInBand`/1 worker, in CI many;
+  races are visible only in CI.
+- **The real network "is usually available"** — the test hits the internet and
+  fails when it is down; that is flaky, not "the infra blinked".
+- **A timeout tuned "just barely"** — passes on a fast machine, fails on a slow
+  runner.
+- **A port/file/connection leak** between tests → "address already in use".
+- **A false-positive fix**: 10 green runs when the original frequency is 1/50
+  proves nothing — compute the required N from the original failure frequency.
 
-## КРИТЕРИИ ГОТОВНОСТИ (DoD)
+## DEFINITION OF DONE (DoD)
 
-- Нестабильность каждого тестового кейса воспроизведена эмпирически, частота
-  падений и режим зафиксированы («было X/N»).
-- Первопричина каждого определена и подтверждена механизмом в коде (file:line),
-  а не догадкой.
-- Фикс устраняет причину (не retry/skip/увеличенный sleep) и сохраняет ЧТО
-  тест проверяет.
-- После фикса — ноль падений на прогоне, сопоставимом/большем по объёму и в
-  том же режиме (порядок/параллель/seed), вывод приложен.
-- То, что не починено сейчас, помещено в quarantine с тикетом и явной
-  пометкой, а не спрятано.
+- The instability of each test case is reproduced empirically, the failure
+  frequency and mode recorded ("was X/N").
+- The root cause of each is identified and confirmed by a mechanism in the code
+  (file:line), not a guess.
+- The fix eliminates the cause (not retry/skip/a longer sleep) and preserves
+  WHAT the test checks.
+- After the fix — zero failures over a run comparable to/larger than before and
+  in the same mode (order/parallel/seed), output attached.
+- Whatever is not fixed now is placed in quarantine with a ticket and an
+  explicit flag, not hidden.
 
-## QUARANTINE-ПОЛИТИКА (для того, что нельзя починить быстро)
+## QUARANTINE POLICY (for what cannot be fixed quickly)
 
-Если первопричина требует крупной переработки (архитектурная гонка, тяжёлая
-инфраструктурная изоляция) и не чинится в рамках задачи:
+If the root cause requires a major rework (an architectural race, heavy
+infrastructure isolation) and cannot be fixed within the task:
 
-- Помести тест в явный карантин **с пометкой и ссылкой на тикет** (маркер/тег
-  quarantine, отдельный прогон/лейбл в CI), а не в тихий `skip`/`retry`.
-- Карантинный тест НЕ должен ронять основной CI, но обязан оставаться видимым
-  (отдельный отчёт), чтобы про него не забыли.
-- Заведи тикет: воспроизведение, гипотеза о причине, что мешает починить.
-- Карантин — временный по определению. Ограничь срок/владельца. Retry без
-  карантина и тикета запрещён.
+- Put the test in explicit quarantine **with a flag and a link to a ticket** (a
+  quarantine marker/tag, a separate run/label in CI), not into a silent
+  `skip`/`retry`.
+- The quarantined test must NOT break the main CI, but must stay visible (a
+  separate report) so it is not forgotten.
+- File a ticket: the reproduction, the hypothesis about the cause, what
+  prevents fixing it.
+- Quarantine is temporary by definition. Bound its lifetime/owner. Retry
+  without quarantine and a ticket is forbidden.
 
-## ФОРМАТ ОТЧЁТА
+## REPORT FORMAT
 
-1. **Итог одной фразой**: N нестабильных тестов диагностировано, M
-   стабилизировано (причина устранена), K — в карантине с тикетами.
-2. **SCOPE** — какие тесты разбирались и как определён периметр.
-3. **Тест-раннер и режим воспроизведения** — команда(ы), которыми ловилась
-   нестабильность (повтор/рандомизация/параллель), исходная частота падений.
-4. **По каждому flaky-тесту**: имя (file:line), первопричина (класс из
-   каталога) + доказательство (как воспроизвёл, что в коде виновато), что
-   исправлено, результат верификации («было 7/50 → стало 0/100»).
-5. **Карантин** — что не починено, почему, ссылки на заведённые тикеты.
-6. **Побочные находки** — если под flaky скрывался реальный продуктовый баг
-   (гонка в самом коде, а не в тесте) — вынеси отдельно, не «замазывай».
-7. **Что не удалось проверить** — не воспроизвелось локально (только в CI),
-   нет доступа к CI-окружению, недостаточно прогонов и т.п.
+1. **One-line summary**: N unstable tests diagnosed, M stabilized (cause
+   eliminated), K in quarantine with tickets.
+2. **SCOPE** — which tests were examined and how the perimeter was determined.
+3. **Test runner and reproduction mode** — the command(s) used to catch the
+   instability (repeat/randomization/parallel), the original failure frequency.
+4. **For each flaky test**: name (file:line), root cause (a class from the
+   catalog) + evidence (how you reproduced it, what in the code is at fault),
+   what was fixed, the verification result ("was 7/50 → became 0/100").
+5. **Quarantine** — what is not fixed, why, links to the filed tickets.
+6. **Side findings** — if a real product bug was hiding behind the flakiness (a
+   race in the code itself, not in the test), call it out separately, do not
+   "paper over" it.
+7. **What could not be verified** — did not reproduce locally (only in CI), no
+   access to the CI environment, not enough runs, etc.
 
-## ЗАПУСК (практическая инструкция)
+## EXECUTION (practical instructions)
 
-1. САМ, в основном потоке, выполни блок SCOPE — определи, какие тесты
-   нестабильны, из `$ARGUMENTS`/CI-лога/контекста. Не делегируй: субагент не
-   видит контекст диалога. Зафиксируй SCOPE.
-2. САМ определи тест-раннер и его средства повтора/рандомизации/параллели.
-3. Воспроизведи нестабильность (многократный прогон в разных режимах) — это
-   опорная точка, без неё нельзя ни диагностировать, ни верифицировать.
-4. Если нестабильных тестов много и доступен Agent tool — раздели на
-   независимые зоны (по файлам/модулям) и запусти по субагенту на зону.
-   Каждому передай: конкретные тесты/пути, определённый раннер и команды
-   воспроизведения, релевантные разделы этого скилла (каталог причин, edge
-   cases, DoD — субагент не видит сам файл) и требование приложить вывод
-   прогонов «до/после».
-5. Чини по первопричине в конвенции проекта. После каждого фикса —
-   верифицируй перепрогоном.
-6. Прогони затронутый набор целиком — убедись, что фиксы (особенно изоляция
-   состояния/teardown) не сломали другие тесты.
-7. Сведи в отчёт по формату выше. Улики падений и промежуточные заметки
-   складывай в файл, а не держи только в контексте.
+1. YOURSELF, in the main thread, perform the SCOPE block — determine which
+   tests are unstable, from `$ARGUMENTS`/the CI log/context. Do not delegate: a
+   subagent does not see the dialog context. Record the SCOPE.
+2. YOURSELF detect the test runner and its repeat/randomization/parallel
+   facilities.
+3. Reproduce the instability (many runs in different modes) — this is your
+   baseline; without it you can neither diagnose nor verify.
+4. If there are many flaky tests and the Agent tool is available, split them
+   into independent zones (by file/module) and launch a subagent per zone. Give
+   each: the specific tests/paths, the detected runner and the reproduction
+   commands, the relevant sections of this skill (the cause catalog, edge
+   cases, DoD — the subagent does not see the file itself) and the requirement
+   to attach the "before/after" run output.
+5. Fix by the root cause in the project's conventions. After each fix, verify
+   with a re-run.
+6. Run the affected suite in full — make sure the fixes (especially state
+   isolation/teardown) did not break other tests.
+7. Consolidate into a report per the format above. Store failure evidence and
+   interim notes in a file, not only in context.
 
-Это авторский скилл: правки тестов вноси так, чтобы устранить причину
-недетерминированности, сохранить проверяемое поведение и оставить тест
-детерминированным. Retry/skip — не фикс, а крайняя мера с явной пометкой и
-тикетом.
+This is an authoring skill: make test edits so as to eliminate the cause of
+nondeterminism, preserve the checked behavior, and leave the test
+deterministic. Retry/skip is not a fix but a last resort, explicitly flagged
+and with a ticket.
+

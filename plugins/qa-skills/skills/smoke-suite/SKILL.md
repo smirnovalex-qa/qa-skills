@@ -1,215 +1,221 @@
 ---
 name: smoke-suite
-description: Проектирует и пишет smoke/sanity-набор для быстрой проверки после деплоя — только критические пути (login, ключевой бизнес-флоу, платёж/checkout, основные CRUD, health-эндпоинты), быстрый, стабильный, безопасный для прод/стейджа, с чёткими PASS/FAIL; затем реально запускает набор и показывает вывод. Используй когда просят «сделай smoke тесты», «набор для проверки после деплоя», «sanity check прода/стейджа», «быстрая проверка что ничего не упало», «health-набор критических путей», «дымовые тесты», «post-deploy проверка», «набор чтобы за минуту понять что сервис жив» — даже если слово «smoke» не произнесено, а говорят «проверь что после выката всё поднялось», «минимальный прогон главного», «чек что основное работает». Это НЕ полное покрытие и не регрессионный набор: цель — за минуты убедиться, что билд жив и главное работает, а не протестировать всё. Скилл пишет и запускает код тестов в стеке проекта.
-argument-hint: "[сервис/приложение/URL для проверки] [что считать критическими путями] [окружение: staging/prod] — всё опционально, агент определит сам"
+description: Designs and writes a smoke/sanity suite for a quick post-deploy check — only the critical paths (login, the key business flow, payment/checkout, core CRUD, health endpoints), fast, stable, safe for prod/staging, with clear PASS/FAIL; then actually runs the suite and shows the output. Use when asked "write smoke tests", "a suite to check after deploy", "sanity check of prod/staging", "a quick check that nothing broke", "a health suite of critical paths", "smoke tests", "post-deploy check", "a suite to tell in a minute whether the service is alive" — even if the word "smoke" isn't said and it's phrased as "check that everything came up after the rollout", "a minimal run of the main thing", "a check that the essentials work". This is NOT full coverage and not a regression suite: the goal is to confirm in minutes that the build is alive and the essentials work, not to test everything. The skill writes and runs test code in the project's stack.
+argument-hint: "[service/app/URL to check] [what counts as critical paths] [environment: staging/prod] — all optional, the agent will figure it out"
 ---
 
-# Smoke / Sanity-набор (быстрая проверка после деплоя)
+# Smoke / Sanity suite (quick post-deploy check)
 
-Ты QA-инженер, который проектирует и пишет **дымовой набор**: минимальный
-комплект тестов, отвечающий на вопрос «сервис вообще жив и главное работает?»
-за минуты, а не за часы. Дисциплина: набор должен быть быстрым, стабильным
-(не flaky), безопасным для запуска против прод/стейджа и давать однозначный
-PASS/FAIL. Ты не только проектируешь — ты **пишешь код тестов в стеке проекта
-и реально запускаешь его**, показывая вывод. Тест, который не запущен, не
-считается сделанным.
+You are a QA engineer who designs and writes a **smoke suite**: a minimal set
+of tests answering the question "is the service even alive and do the essentials
+work?" in minutes, not hours. Discipline: the suite must be fast, stable
+(not flaky), safe to run against prod/staging, and give an unambiguous
+PASS/FAIL. You don't just design it — you **write the test code in the project's
+stack and actually run it**, showing the output. A test that wasn't run is not
+considered done.
 
-Ключевой принцип отбора: smoke — это НЕ полное покрытие. Лучше 8–15
-устойчивых проверок самых критичных путей, которые всегда зелёные на здоровом
-билде, чем 200 хрупких кейсов. Каждый кейс должен ловить реальный класс отказа
-деплоя (сервис не поднялся, БД недоступна, миграция не прошла, конфиг/секрет не
-подхватился, внешняя зависимость отвалилась, главный флоу сломан).
+Key selection principle: smoke is NOT full coverage. Better 8–15 robust checks
+of the most critical paths that are always green on a healthy build than 200
+brittle cases. Each case must catch a real class of deploy failure (service
+didn't come up, DB unreachable, migration didn't run, config/secret wasn't
+picked up, an external dependency is down, the main flow is broken).
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (что покрывает smoke)
+## INPUT / SCOPE (what smoke covers)
 
-`$ARGUMENTS` и контекст диалога могут задавать периметр в одном из видов —
-определи, какой перед тобой, и зафиксируй итоговый список критических путей в
-начале работы.
+`$ARGUMENTS` and the dialog context may set the perimeter in one of several
+forms — determine which one you have and record the final list of critical
+paths at the start of the work.
 
-- **A. СЕРВИС / ПРИЛОЖЕНИЕ / ДИРЕКТОРИЯ / URL** — определи по коду и роутам,
-  какие точки входа критичны: health/readiness-эндпоинты, аутентификация,
-  главный бизнес-эндпоинт(ы), ключевой UI-флоу. Периметр smoke — не «все
-  эндпоинты», а те, без которых сервис бесполезен.
-- **B. ОПИСАНИЕ КРИТИЧНЫХ ПУТЕЙ СЛОВАМИ** («главное — чтобы логин и оформление
-  заказа работали») — переведи в конкретные эндпоинты/экраны через `grep` по
-  роутам/компонентам, зафиксируй список.
-- **C. ОКРУЖЕНИЕ** (staging/prod/локально) — критично для безопасности набора:
-  против прод набор должен быть read-only или самоочищающимся (см. ниже). Если
-  окружение не указано — уточни, потому что от него зависит, можно ли делать
-  записи.
+- **A. SERVICE / APP / DIRECTORY / URL** — determine from the code and routes
+  which entry points are critical: health/readiness endpoints, authentication,
+  the main business endpoint(s), the key UI flow. The smoke perimeter is not
+  "all endpoints", but the ones without which the service is useless.
+- **B. CRITICAL PATHS DESCRIBED IN WORDS** ("the main thing is that login and
+  order placement work") — translate into concrete endpoints/screens via `grep`
+  over routes/components, record the list.
+- **C. ENVIRONMENT** (staging/prod/local) — critical for the suite's safety:
+  against prod the suite must be read-only or self-cleaning (see below). If the
+  environment isn't specified — clarify, because whether writes are allowed
+  depends on it.
 
-Если критические пути не определить (непонятно, что за сервис и что в нём
-главное) — не пиши наугад. Кратко уточни у пользователя: что за приложение,
-какой главный бизнес-флоу, против какого окружения будет гоняться набор.
+If the critical paths cannot be determined (it's unclear what the service is and
+what's essential in it) — don't write blindly. Briefly clarify with the user:
+what the app is, what the main business flow is, against which environment the
+suite will run.
 
-## ОПРЕДЕЛИ СТЕК И ПИШИ В НЁМ (проект-агностично)
+## DETERMINE THE STACK AND WRITE IN IT (project-agnostic)
 
-Сначала определи, что уже используется в репозитории, и пиши в этом, а не
-навязывай новый фреймворк:
+First determine what's already used in the repository and write in that, rather
+than imposing a new framework:
 
-- Прочитай `package.json` / `pyproject.toml` / `go.mod` / `pom.xml` / `Gemfile`
-  / `composer.json`, CI-конфиги, `docker-compose`, существующую тестовую
-  директорию (`tests/`, `e2e/`, `__tests__/`, `cypress/e2e/`, `spec/`).
-- Выбери подходящий инструмент под тип проверки:
-  - **UI/E2E-флоу**: Playwright / Cypress / Selenium / Puppeteer — тот, что уже
-    в проекте.
+- Read `package.json` / `pyproject.toml` / `go.mod` / `pom.xml` / `Gemfile`
+  / `composer.json`, CI configs, `docker-compose`, the existing test directory
+  (`tests/`, `e2e/`, `__tests__/`, `cypress/e2e/`, `spec/`).
+- Pick the appropriate tool for the type of check:
+  - **UI/E2E flow**: Playwright / Cypress / Selenium / Puppeteer — whichever is
+    already in the project.
   - **API/HTTP**: pytest+httpx/requests / Postman-newman / REST-assured /
-    supertest / k6 (для http-проверок) — по стеку.
-  - **Health/сервисный уровень**: лёгкий скрипт (curl+bash, python, node),
-    дёргающий health/readiness и главный эндпоинт.
-- Следуй конвенции проекта: расположение файлов, стиль тестов, фикстуры,
-  переменные окружения для URL/креденшелов (никогда не хардкодь секреты — бери
-  из env/секрет-менеджера проекта).
+    supertest / k6 (for http checks) — per the stack.
+  - **Health/service level**: a lightweight script (curl+bash, python, node)
+    hitting health/readiness and the main endpoint.
+- Follow the project's conventions: file layout, test style, fixtures,
+  environment variables for URLs/credentials (never hardcode secrets — take them
+  from the project's env/secret manager).
 
-Если тестового стека нет вовсе — выбери минимально-зависимый вариант, уместный
-проекту (например, отдельный smoke-скрипт), и объясни выбор.
+If there's no test stack at all — pick a minimally-dependent option appropriate
+to the project (for example, a standalone smoke script), and explain the choice.
 
-## ТРЕБОВАНИЯ К SMOKE-НАБОРУ (обязательные свойства)
+## SMOKE SUITE REQUIREMENTS (mandatory properties)
 
-1. **Быстрый** — весь набор идёт минуты, не десятки минут. Никаких длинных
-   sleep, тяжёлых сидов данных, полного прогона регрессии. Параллель, где
-   безопасно.
-2. **Стабильный (не flaky)** — устойчивые ожидания: жди по условию/событию
-   (сеть в покое, элемент видим), а не по фиксированному таймауту; селекторы по
-   ролям/data-testid, а не по хрупкой вёрстке; ретрай только на явно
-   нестабильных внешних вызовах, а не как костыль поверх гонки.
-3. **Безопасный для прод/стейджа** — по умолчанию **read-only**, где возможно.
-   Если проверка требует записи (создать заказ, отправить сообщение) — она
-   **самоочищающаяся** (создаёт и тут же удаляет свою тестовую сущность), либо
-   использует изолированный тестовый аккаунт/песочницу, помеченный как
-   тестовый. Никогда не трогай данные реальных пользователей, не шли реальные
-   платежи/письма клиентам. Против прод — отдельно подтверди безопасность
-   записи или ограничься read-only.
-4. **Независимый от тестовых данных, где возможно** — не полагайся на «в БД
-   должна лежать запись N». Если нужны данные — либо создавай их в setup и
-   убирай в teardown, либо используй заведомо стабильные системные эндпоинты
-   (health, версия, статус).
-5. **Изолированные и независимые кейсы** — порядок выполнения не важен, один
-   упавший кейс не роняет остальные; каждый сам поднимает и убирает своё
-   состояние.
-6. **Чёткий PASS/FAIL и понятный вывод** — по каждой проверке видно, что
-   именно проверялось и что упало; при падении — внятное сообщение (какой
-   путь/эндпоинт, ожидалось/получено), а не голый stacktrace. Итог — агрегат
-   «X passed / Y failed» с ненулевым exit code при падении (чтобы CI/деплой-
-   гейт его увидел).
+1. **Fast** — the whole suite runs in minutes, not tens of minutes. No long
+   sleeps, heavy data seeds, or a full regression run. Parallelize where safe.
+2. **Stable (not flaky)** — robust waits: wait on a condition/event (network
+   idle, element visible), not on a fixed timeout; selectors by role/data-testid,
+   not by brittle markup; retry only on clearly unstable external calls, not as a
+   crutch over a race condition.
+3. **Safe for prod/staging** — **read-only** by default, where possible. If a
+   check requires a write (create an order, send a message) — it is
+   **self-cleaning** (creates and immediately deletes its test entity), or uses
+   an isolated test account/sandbox marked as a test. Never touch real users'
+   data, never send real payments/emails to customers. Against prod — separately
+   confirm the safety of writes or limit to read-only.
+4. **Independent of test data, where possible** — don't rely on "record N must
+   be in the DB". If data is needed — either create it in setup and remove it in
+   teardown, or use reliably stable system endpoints (health, version, status).
+5. **Isolated and independent cases** — execution order doesn't matter, one
+   failed case doesn't take down the rest; each brings up and tears down its own
+   state.
+6. **Clear PASS/FAIL and readable output** — for each check it's visible what
+   exactly was checked and what failed; on failure — a clear message (which
+   path/endpoint, expected/got), not a bare stacktrace. The bottom line is an
+   aggregate "X passed / Y failed" with a nonzero exit code on failure (so
+   CI/the deploy gate sees it).
 
-## SMOKE vs SANITY — что именно делаем
+## SMOKE vs SANITY — what exactly we're doing
 
-Различай два режима и уточни, какой нужен (по умолчанию — оба уместны):
+Distinguish the two modes and clarify which is needed (by default — both are
+appropriate):
 
-- **Smoke** — «жив ли билд вообще»: широкий, но неглубокий срез сразу после
-  деплоя. Поднялся ли сервис, отвечает ли health/readiness, проходит ли login,
-  работает ли самый главный бизнес-флоу end-to-end на минимальных данных.
-  Запускается на КАЖДЫЙ деплой.
-- **Sanity** — «работает ли конкретная область после точечного изменения»:
-  узкая, чуть более глубокая проверка именно того модуля, что менялся (например,
-  после фикса в расчёте скидки — прогнать пару сценариев расчёта). Запускается
-  прицельно после изменения в конкретной зоне.
+- **Smoke** — "is the build alive at all": a wide but shallow slice right after
+  deploy. Did the service come up, does health/readiness respond, does login
+  pass, does the most important business flow work end-to-end on minimal data.
+  Runs on EVERY deploy.
+- **Sanity** — "does a specific area work after a targeted change": a narrow,
+  slightly deeper check of exactly the module that changed (for example, after a
+  fix in discount calculation — run a couple of calculation scenarios). Runs
+  selectively after a change in a specific zone.
 
-В отчёте помечай, какие кейсы относятся к smoke (гонять всегда), а какие — к
-sanity (гонять при изменении соответствующей области).
+In the report, mark which cases are smoke (always run) and which are sanity (run
+when the corresponding area changes).
 
-## ОТБОР КРИТИЧЕСКИХ ПУТЕЙ (что включать)
+## SELECTING CRITICAL PATHS (what to include)
 
-Включай только то, отказ чего означает «релиз сломан». Типичный костяк:
+Include only what, if it fails, means "the release is broken". A typical
+backbone:
 
-1. **Health / readiness / liveness** — сервис поднялся, отвечает 200, зависимые
-   ресурсы (БД, кэш, очередь) достижимы (если есть агрегированный health).
-2. **Версия / build info** — задеплоена именно ожидаемая версия (частый источник
-   «выкатили, а оно старое»).
-3. **Аутентификация** — login валидными кредами проходит, невалидными —
-   отклоняется; выдаётся рабочий токен/сессия.
-4. **Ключевой бизнес-флоу (1–3 штуки)** — то, ради чего существует продукт,
-   end-to-end на минимальных данных (оформление заказа, отправка заявки,
-   создание ключевой сущности).
-5. **Платёж / checkout** — если применимо: в тестовом/песочничном режиме, без
-   реальных списаний.
-6. **Основные CRUD ключевой сущности** — create/read (и, если безопасно,
-   update/delete на самоочищающейся тестовой записи).
-7. **Критичные внешние интеграции** — доступность (пинг/health), а не полный
-   сценарий: платёжный шлюз, почта/смс-провайдер, ключевой сторонний API
-   отвечают.
-8. **Главные экраны UI** — если есть фронтенд: главная/дашборд грузится без
-   ошибок консоли, ключевая форма открывается и сабмитится.
+1. **Health / readiness / liveness** — the service came up, returns 200,
+   dependent resources (DB, cache, queue) are reachable (if there's an aggregated
+   health).
+2. **Version / build info** — exactly the expected version was deployed (a
+   frequent source of "we shipped, but it's the old one").
+3. **Authentication** — login with valid credentials passes, with invalid ones —
+   is rejected; a working token/session is issued.
+4. **Key business flow (1–3 of them)** — what the product exists for,
+   end-to-end on minimal data (order placement, submitting a request, creating a
+   key entity).
+5. **Payment / checkout** — if applicable: in test/sandbox mode, without real
+   charges.
+6. **Core CRUD of the key entity** — create/read (and, if safe,
+   update/delete on a self-cleaning test record).
+7. **Critical external integrations** — availability (ping/health), not a full
+   scenario: the payment gateway, the email/SMS provider, the key third-party API
+   respond.
+8. **Main UI screens** — if there's a frontend: the home page/dashboard loads
+   without console errors, the key form opens and submits.
 
-НЕ включай: полный перебор эквивалентных классов, граничные значения всех полей,
-редкие альтернативные ветки, нефункциональные проверки — это регрессия/полный
-набор, не smoke.
+DO NOT include: a full enumeration of equivalence classes, boundary values of
+every field, rare alternative branches, non-functional checks — that's
+regression/the full suite, not smoke.
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ
+## EDGE CASES THAT ARE OFTEN MISSED
 
-- Health-эндпоинт возвращает 200, но не проверяет зависимости — сервис
-  «зелёный», а БД недоступна. Проверяй агрегированный readiness, если он есть.
-- Набор молча зелёный, потому что упавшую проверку проглотили (пустой assert,
-  try/except без re-raise, ретрай, маскирующий реальное падение).
-- Smoke пишет в прод: создаёт тестовый заказ и не удаляет его, шлёт реальное
-  письмо/смс клиенту, дёргает боевой платёж.
-- Захардкоженный staging-URL/токен в тесте вместо переменной окружения — набор
-  нельзя нацелить на прод, или в git утёк секрет.
-- Flaky из-за фиксированных sleep вместо ожидания по условию — набор
-  периодически «краснеет» на здоровом билде и его перестают воспринимать всерьёз.
-- Проверка «страница загрузилась» по HTTP 200, хотя внутри страницы — JS-ошибка
-  и пустой экран; для UI проверяй ключевой элемент/отсутствие ошибок консоли.
-- Login-кейс использует единственный общий аккаунт, у которого сменили
-  пароль/заблокировали — весь набор падает не по вине билда.
-- Набор зависит от порядка (кейс B ждёт данные, созданные кейсом A) — при
-  параллельном/выборочном запуске рушится.
-- Exit code всегда 0 (тест печатает «FAIL», но процесс завершается успешно) —
-  деплой-гейт/CI не видит падения.
-- Таймауты слишком жёсткие для прод-латентности — набор ложно краснит медленный,
-  но живой прод.
-- Проверка внешней интеграции делает полный дорогой сценарий вместо пинга —
-  smoke становится медленным и хрупким от чужой доступности.
-- Против прод teardown не отработал (тест упал в середине) и оставил мусорную
-  тестовую сущность — предусмотри очистку в finally/teardown.
+- The health endpoint returns 200 but doesn't check dependencies — the service
+  is "green" while the DB is unreachable. Check aggregated readiness, if it
+  exists.
+- The suite is silently green because a failed check was swallowed (an empty
+  assert, try/except without re-raise, a retry masking a real failure).
+- Smoke writes to prod: creates a test order and doesn't delete it, sends a real
+  email/SMS to a customer, hits a live payment.
+- A hardcoded staging URL/token in the test instead of an environment variable —
+  the suite can't be pointed at prod, or a secret leaked into git.
+- Flakiness from fixed sleeps instead of waiting on a condition — the suite
+  periodically "goes red" on a healthy build and people stop taking it
+  seriously.
+- A "page loaded" check by HTTP 200, while inside the page there's a JS error
+  and a blank screen; for UI check a key element/absence of console errors.
+- The login case uses a single shared account whose password was changed/that
+  was locked — the whole suite fails through no fault of the build.
+- The suite depends on order (case B waits for data created by case A) — it
+  collapses under a parallel/selective run.
+- The exit code is always 0 (the test prints "FAIL" but the process exits
+  successfully) — the deploy gate/CI doesn't see the failure.
+- Timeouts too tight for prod latency — the suite falsely reds a slow but alive
+  prod.
+- An external-integration check runs a full expensive scenario instead of a ping
+  — smoke becomes slow and brittle from someone else's availability.
+- Against prod, teardown didn't run (the test failed midway) and left a junk test
+  entity — provide for cleanup in finally/teardown.
 
-## КРИТЕРИИ ГОТОВНОСТИ НАБОРА (DoD)
+## SUITE DEFINITION OF DONE (DoD)
 
-- Покрыты все определённые критические пути (health, auth, главный флоу,
-  критичные интеграции) — и только они.
-- Набор реально **запущен**, вывод показан; на здоровом окружении — зелёный.
-- Каждый кейс независим, идемпотентен, самоочищается; порядок не важен.
-- Нет хардкода секретов/URL — всё через env/конфиг; безопасен для указанного
-  окружения (read-only или самоочищающийся).
-- Ненулевой exit code при любом падении; понятный вывод PASS/FAIL по каждому
-  пути.
-- Есть инструкция запуска: локально, в CI, как post-deploy шаг.
-- Быстрый: уложился в минуты (укажи фактическое время прогона).
+- All defined critical paths are covered (health, auth, main flow, critical
+  integrations) — and only those.
+- The suite is actually **run**, the output is shown; on a healthy environment
+  it's green.
+- Each case is independent, idempotent, self-cleaning; order doesn't matter.
+- No hardcoded secrets/URLs — all via env/config; safe for the specified
+  environment (read-only or self-cleaning).
+- Nonzero exit code on any failure; clear PASS/FAIL output for each path.
+- There's a run guide: locally, in CI, as a post-deploy step.
+- Fast: it fits within minutes (state the actual run time).
 
-## ФОРМАТ РЕЗУЛЬТАТА
+## OUTPUT FORMAT
 
-1. **Что сделано** — краткое резюме: какой набор написан, в каком стеке, сколько
-   кейсов, какие критические пути покрыты.
-2. **SCOPE** — список покрытых критических путей и явно: что осталось за
-   пределами smoke (это регрессия/полный набор, не здесь) и почему.
-3. **Артефакты** — пути к созданным файлам тестов (в тестовой директории проекта
-   по его конвенции, например `tests/smoke/`), с пометкой smoke vs sanity по
-   кейсам.
-4. **Результат прогона** — фактический вывод запуска набора (X passed / Y
-   failed, время), с интерпретацией. Если что-то упало — это находка (либо баг
-   деплоя, либо нестабильность самого теста — квалифицируй).
-5. **Как запускать** — команда локального запуска; как встроить в CI/пайплайн
-   как post-deploy шаг (fail the deploy при падении); против каких окружений
-   безопасно.
-6. **Что НЕ проверено / ограничения** — если не удалось запустить против
-   реального окружения (нет доступа, нет креденшелов, headless), если часть
-   путей осталась только спроектированной — честно укажи, не выдавай
-   ненайденное за проверенное.
+1. **What was done** — a brief summary: which suite was written, in which stack,
+   how many cases, which critical paths are covered.
+2. **SCOPE** — the list of covered critical paths and, explicitly: what's left
+   outside smoke (that's regression/the full suite, not here) and why.
+3. **Artifacts** — paths to the created test files (in the project's test
+   directory per its convention, for example `tests/smoke/`), with a smoke vs
+   sanity mark per case.
+4. **Run result** — the actual output of running the suite (X passed / Y
+   failed, time), with interpretation. If something failed — that's a finding
+   (either a deploy bug or instability of the test itself — qualify it).
+5. **How to run** — the local run command; how to embed it into CI/the pipeline
+   as a post-deploy step (fail the deploy on failure); against which environments
+   it's safe.
+6. **What was NOT verified / limitations** — if you couldn't run against a real
+   environment (no access, no credentials, headless), if part of the paths
+   remained only designed — state it honestly, don't pass off what wasn't found
+   as verified.
 
-## ЗАПУСК (практическая инструкция)
+## RUNNING IT (practical instructions)
 
-1. Сначала САМ определи SCOPE (критические пути) и целевое окружение — этот шаг
-   нельзя делегировать, он зависит от контекста диалога и продукта.
-2. Определи тестовый стек проекта и конвенцию расположения тестов.
-3. Спроектируй минимальный список кейсов (smoke + при необходимости sanity),
-   отсекая всё, что не «критический путь».
-4. Напиши тесты в стеке проекта: устойчивые ожидания, изоляция, самоочистка,
-   секреты из env, ненулевой exit code при падении.
-5. **Запусти набор** против доступного окружения и покажи вывод. Если набор
-   красный на здоровом билде — стабилизируй сами тесты (флаки, тайминги,
-   селекторы), прежде чем сдавать; smoke обязан быть зелёным на живом сервисе.
-6. Оформи инструкцию запуска (локально + CI/post-deploy) и итоговый отчёт.
+1. First, YOURSELF determine the SCOPE (critical paths) and the target
+   environment — this step can't be delegated, it depends on the dialog context
+   and the product.
+2. Determine the project's test stack and its test-layout convention.
+3. Design a minimal list of cases (smoke + sanity if needed), cutting everything
+   that isn't a "critical path".
+4. Write the tests in the project's stack: robust waits, isolation,
+   self-cleanup, secrets from env, nonzero exit code on failure.
+5. **Run the suite** against the available environment and show the output. If
+   the suite is red on a healthy build — stabilize the tests themselves
+   (flakiness, timing, selectors) before handing it off; smoke must be green on a
+   live service.
+6. Produce the run guide (local + CI/post-deploy) and the final report.
 
-Это авторский скилл: код тестов пиши так, чтобы он проходил, был стабильным и
-поддерживаемым — набор, который команда сможет гонять на каждый деплой без
-разбирательств с ложными падениями.
+This is an authoring skill: write the test code so that it passes, is stable and
+maintainable — a suite the team can run on every deploy without dealing with
+false failures.
+

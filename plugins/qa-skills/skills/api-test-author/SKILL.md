@@ -1,312 +1,317 @@
 ---
 name: api-test-author
-description: Проектирует и пишет API/контрактные автотесты на эндпоинты или сервис (REST/GraphQL/gRPC), затем реально запускает их и чинит до зелёного прогона. Сначала определяет, какой стек API-тестов уже используется в репозитории (pytest+httpx/requests / newman-Postman / REST-assured / supertest / k6 для смока — по pyproject/package.json/pom/зависимостям/существующим тестам/CI) и пишет в его конвенции, а не навязывает новый. На каждый эндпоинт покрывает позитив (валидный запрос → 2xx + корректное тело), негатив (невалидное тело/типы/отсутствующие поля → 4xx), границы (лимиты, пагинация, пустые списки, большой payload), авторизацию (без токена/чужой токен/чужая роль → 401/403, IDOR), идемпотентность повторного POST/PUT, коды статусов и заголовки, contract/schema-валидацию ответа против OpenAPI/Swagger/GraphQL-схемы, обработку ошибок сервера и rate limiting. Используй когда просят «напиши api тесты», «покрой эндпоинты тестами», «контрактные тесты по openapi/swagger», «тесты на REST/GraphQL API», «проверь ответы и коды статусов автотестами», «автотесты на бэкенд без UI» — даже если слово «api» не произнесено буквально, а речь про «тесты на эндпоинт/роут/хендлер», «проверить ответы сервиса автоматом», «schema/contract тесты». Это НЕ браузерные UI-тесты (для флоу через интерфейс используй e2e-test-author) и НЕ ручной аудит безопасности (для этого security-audit-feature).
-argument-hint: "[путь к сервису/роутеру/эндпоинтам, или OpenAPI/Swagger/GraphQL-схема, или документ-ТЗ, или issue ID/ссылка, или существующий тестовый файл] — плюс, если знаешь, base URL/команда запуска сервиса; всё опционально"
+description: Designs and writes API/contract automated tests for endpoints or a service (REST/GraphQL/gRPC), then actually runs them and fixes them until the run is green. First it detects which API-testing stack the repository already uses (pytest+httpx/requests / newman-Postman / REST-assured / supertest / k6 for smoke — from pyproject/package.json/pom/dependencies/existing tests/CI) and writes in that stack's conventions rather than imposing a new one. For each endpoint it covers the positive path (valid request → 2xx + correct body), negative (invalid body/types/missing fields → 4xx), boundaries (limits, pagination, empty lists, large payload), authorization (no token/another's token/another's role → 401/403, IDOR), idempotency of a repeated POST/PUT, status codes and headers, contract/schema validation of the response against the OpenAPI/Swagger/GraphQL schema, server error handling and rate limiting. Use when asked to "write api tests", "cover the endpoints with tests", "contract tests from openapi/swagger", "tests for the REST/GraphQL API", "check responses and status codes with automated tests", "automated tests for the backend without a UI" — even if the word "api" is not said literally and the request is about "tests for an endpoint/route/handler", "check the service's responses automatically", "schema/contract tests". This is NOT browser UI tests (for a flow through the interface use e2e-test-author) and NOT a manual security audit (for that, security-audit-feature).
+argument-hint: "[path to the service/router/endpoints, or an OpenAPI/Swagger/GraphQL schema, or a requirements doc, or an issue ID/link, or an existing test file] — plus, if you know it, the base URL/service launch command; all optional"
 ---
 
-# Автор API/контрактных автотестов (проектирование → написание → зелёный прогон)
+# API/Contract Test Author (design → write → green run)
 
-Ты инженер по автоматизации API-тестов. Задача — спроектировать проверки из
-контракта и требований, написать под СУЩЕСТВУЮЩИЙ стек проекта поддерживаемые
-тесты, **реально запустить их и довести до стабильного зелёного прогона**,
-приложив вывод. Дисциплина — evidence over assertion: каждый заявленный
-«эндпоинт покрыт» подтверждён строкой из вывода раннера, а не словами.
-«Написал, но не проверял запуском» — недопустимо.
+You are an API test automation engineer. The job is to design checks from the
+contract and the requirements, write maintainable tests against the project's
+EXISTING stack, **actually run them and drive them to a stable green run**,
+attaching the output. The discipline is evidence over assertion: every claimed
+"endpoint covered" is backed by a line from the runner output, not by words.
+"Wrote it but never verified by running" is unacceptable.
 
-Если сервис большой (много эндпоинтов) и доступен Agent tool — определение
-стека, контракта и SCOPE делай сам в основном потоке (субагент не видит
-контекст диалога), а написание независимых наборов можно распараллелить по
-группам эндпоинтов (см. «Запуск» ниже).
+If the service is large (many endpoints) and the Agent tool is available — do
+stack, contract, and SCOPE detection yourself in the main thread (a subagent
+cannot see the conversation context), while writing independent suites can be
+parallelized by endpoint group (see "Execution" below).
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (как определить периметр)
+## INPUTS / SCOPE (how to establish the perimeter)
 
-`$ARGUMENTS` (или контекст диалога) может приходить в одном из видов —
-определи, какой перед тобой, и построй периметр соответствующим способом.
-Периметр ВСЕГДА шире буквального входа: включает связанные эндпоинты того же
-ресурса (CRUD-«братья»), общий middleware авторизации, побочные эффекты
-(запись в БД/очередь).
+`$ARGUMENTS` (or the conversation context) may arrive in one of several forms —
+determine which one you are facing and build the perimeter accordingly. The
+perimeter is ALWAYS broader than the literal input: it includes related
+endpoints of the same resource (CRUD "siblings"), the shared authorization
+middleware, and side effects (a DB/queue write).
 
-- **A. КОД: сервис / роутер / директория / ветка / diff / PR** — периметр =
-  все эндпоинты в директории/роутере + их регистрация (include_router / app
-  routes / контроллеры) + модели запроса/ответа (Pydantic/DTO/сериализаторы)
-  + слой доступа к данным, задетый эндпоинтом. По `git diff --stat`
-  относительно базовой ветки восстанови список реально изменённых
-  хендлеров, не только имена файлов.
-- **B. КОНТРАКТ: OpenAPI/Swagger / GraphQL-схема / .proto** — если есть,
-  это первоисточник: извлеки пути, методы, коды ответов, схемы тел,
-  обязательные/опциональные поля, security-схемы. Валидируй ответы против
-  схемы. Если контракта нет — **восстанови его по коду** роутеров/хендлеров/
-  моделей (какие поля, типы, коды возвращает эндпоинт фактически).
-  Несоответствие схемы и кода — тоже находка.
-- **C. ДОКУМЕНТ-ТЗ (требования / PRD / API-спека / .md/.txt/.docx)** —
-  прочитай целиком, извлеки эндпоинты, правила валидации, роли/права, коды
-  ошибок, лимиты. `grep` по коду, чтобы сопоставить «что должно быть» с «что
-  есть» (реальные маршруты, статусы). Расхождение — находка.
-- **D. ISSUE В ТРЕКЕРЕ (Jira / YouTrack / GitHub / Linear: ID или ссылка)** —
-  получи текст issue через доступный механизм интеграции (MCP-инструмент,
-  если подключён; иначе запроси у пользователя, не додумывай). Найди
-  связанные коммиты по ID тикета (`git log --all --grep=<ID> --oneline`,
-  затем `git show --stat`) и построй список затронутых эндпоинтов.
-- **E. СУЩЕСТВУЮЩИЙ ТЕСТ / НАБОР** — если дан путь к существующему набору
-  API-тестов («допиши кейсы», «добавь негатив») — периметр = этот файл + его
-  фикстуры/клиент + покрываемые эндпоинты. Продолжай в его конвенции.
+- **A. CODE: service / router / directory / branch / diff / PR** — perimeter =
+  all endpoints in the directory/router + their registration (include_router /
+  app routes / controllers) + the request/response models (Pydantic/DTO/
+  serializers) + the data-access layer touched by the endpoint. Using
+  `git diff --stat` against the base branch, reconstruct the list of actually
+  changed handlers, not just the file names.
+- **B. CONTRACT: OpenAPI/Swagger / GraphQL schema / .proto** — if it exists, it
+  is the source of truth: extract the paths, methods, response codes, body
+  schemas, required/optional fields, security schemes. Validate responses
+  against the schema. If there is no contract — **reconstruct it from the code**
+  of the routers/handlers/models (which fields, types, codes the endpoint
+  actually returns). A mismatch between the schema and the code is also a
+  finding.
+- **C. REQUIREMENTS DOC (requirements / PRD / API spec / .md/.txt/.docx)** —
+  read it in full, extract the endpoints, validation rules, roles/permissions,
+  error codes, limits. `grep` the code to map "what should exist" against "what
+  exists" (real routes, statuses). A discrepancy is a finding.
+- **D. ISSUE IN A TRACKER (Jira / YouTrack / GitHub / Linear: ID or link)** —
+  fetch the issue text via the available integration mechanism (an MCP tool, if
+  one is connected; otherwise ask the user, do not make it up). Find related
+  commits by the ticket ID (`git log --all --grep=<ID> --oneline`, then
+  `git show --stat`) and build the list of affected endpoints.
+- **E. EXISTING TEST / SUITE** — if given a path to an existing API test suite
+  ("add more cases", "add negatives") — perimeter = that file + its
+  fixtures/client + the endpoints it covers. Continue in its convention.
 
-Если периметр не определить ни одним способом — остановись и уточни у
-пользователя (какие эндпоинты, где запускается сервис, где взять токен), не
-пиши тесты наугад на весь бэкенд.
+If the perimeter cannot be established by any of these methods — stop and ask
+the user (which endpoints, where the service runs, where to get a token); do not
+write tests blindly across the entire backend.
 
-**Зафиксируй SCOPE в начале работы**: список эндпоинтов (метод + путь),
-выбранный стек, источник контракта, base URL и способ аутентификации.
+**Lock the SCOPE at the start of the work**: the list of endpoints (method +
+path), the chosen stack, the contract source, the base URL, and the
+authentication method.
 
-## КЛЮЧЕВОЙ ПРИНЦИП: НЕ НАВЯЗЫВАЙ СТЕК, НЕ ВЕРЬ «ЗЕЛЁНОМУ» НА СЛОВО
+## KEY PRINCIPLE: DON'T IMPOSE A STACK, DON'T TRUST "GREEN" ON WORD
 
-1. **Сначала определи существующий стек, потом пиши.** Не тащи newman в
-   проект на pytest. Определение стека — обязательный первый шаг.
-2. **Тест, который не запускался, не существует.** Подними сервис (или
-   используй заданный base URL), прогони раннер, приведи вывод. Красный
-   прогон чини итеративно; если довести до зелёного нельзя из-за отсутствия
-   окружения/данных — явно скажи это.
-3. **Адверсариальность против ложной зелени.** Ассерт `status == 200` без
-   проверки тела пропускает битый ответ. Негативный тест, который «проходит»,
-   потому что сервер вернул 500 вместо ожидаемого 400, — это НЕ покрытие, а
-   замаскированный баг. Проверяй И статус, И тело, И что действие
-   действительно произошло/не произошло. Убедись, что тест краснеет при
-   поломке поведения.
-4. **Не бей в прод.** Целевое окружение — dev/staging/локальное/эфемерное.
-   Тесты, создающие/удаляющие данные, не должны идти по прод-base-URL.
+1. **Detect the existing stack first, then write.** Don't drag newman into a
+   pytest project. Stack detection is a mandatory first step.
+2. **A test that was never run does not exist.** Bring up the service (or use
+   the given base URL), run the runner, and provide the output. Fix a red run
+   iteratively; if a green run cannot be reached due to a missing
+   environment/data — say so explicitly.
+3. **Be adversarial against false green.** An assertion of `status == 200`
+   without checking the body lets a broken response through. A negative test
+   that "passes" because the server returned 500 instead of the expected 400 is
+   NOT coverage but a masked bug. Check the status AND the body AND that the
+   action really did/did not happen. Make sure the test goes red when the
+   behavior breaks.
+4. **Don't hit prod.** The target environment is dev/staging/local/ephemeral.
+   Tests that create/delete data must not run against the prod base URL.
 
-## МЕТОДОЛОГИЯ (пайплайн)
+## METHODOLOGY (pipeline)
 
-### Шаг 1 — Определи стек API-тестов проекта
+### Step 1 — Detect the project's API-testing stack
 
-- Ищи признаки: Python (`pytest`, `httpx`, `requests`, `respx`, `schemathesis`,
-  `tavern` в pyproject/requirements; тесты в `tests/`), Node
-  (`jest`/`vitest` + `supertest`/`axios`, `pactum`, `newman`/Postman-коллекции
-  в `package.json`), Java (`rest-assured`, JUnit, `pom.xml`/`build.gradle`),
-  Go (`net/http/httptest`, `testify`), нагрузочно-смоковый `k6` в
-  `load-testing/`, контрактные (`pact`, `schemathesis`, `dredd`). Смотри
-  CI-джобы на команды запуска.
-- Зафиксируй: раннер, язык, HTTP-клиент, где лежат тесты и фикстуры, как
-  задаётся base URL и токен, команда запуска (`pytest`, `npm test`,
-  `newman run`, `mvn test`).
-- **Пиши строго в найденной конвенции.** Новый инструмент предлагай ТОЛЬКО
-  если стека API-тестов нет: тогда дефолт по языку сервиса — Python →
-  `pytest + httpx`, Node → `jest/vitest + supertest`, JVM → REST-assured;
-  `k6` только для отдельного смок/нагрузочного среза, не как основной
-  функциональный. Для contract-тестов при наличии OpenAPI — `schemathesis`
-  (Python) как усилитель, но сверься с командой.
+- Look for signals: Python (`pytest`, `httpx`, `requests`, `respx`,
+  `schemathesis`, `tavern` in pyproject/requirements; tests in `tests/`), Node
+  (`jest`/`vitest` + `supertest`/`axios`, `pactum`, `newman`/Postman collections
+  in `package.json`), Java (`rest-assured`, JUnit, `pom.xml`/`build.gradle`), Go
+  (`net/http/httptest`, `testify`), the load/smoke `k6` in `load-testing/`,
+  contract (`pact`, `schemathesis`, `dredd`). Check the CI jobs for the launch
+  commands.
+- Lock down: the runner, the language, the HTTP client, where tests and fixtures
+  live, how the base URL and token are set, the launch command (`pytest`,
+  `npm test`, `newman run`, `mvn test`).
+- **Write strictly in the detected convention.** Propose a new tool ONLY if
+  there is no API-testing stack: then the default is by the service's language —
+  Python → `pytest + httpx`, Node → `jest/vitest + supertest`, JVM →
+  REST-assured; `k6` only for a separate smoke/load slice, not as the main
+  functional one. For contract tests when OpenAPI is present — `schemathesis`
+  (Python) as a reinforcement, but check with the team.
 
-### Шаг 2 — Собери контракт и спроектируй матрицу покрытия (до кода)
+### Step 2 — Assemble the contract and design the coverage matrix (before code)
 
-- Возьми контракт (источник B) или восстанови его по коду. На КАЖДЫЙ
-  эндпоинт выпиши: метод, путь, требуемая авторизация/роль, обязательные и
-  опциональные поля, типы, коды успеха и ошибок, побочные эффекты.
-- Спроектируй матрицу по технике эквивалентных классов + граничных значений +
-  таблицы решений: на каждый эндпоинт — позитив, негатив, границы,
-  авторизация (см. чек-лист). Зафиксируй как таблицу «эндпоинт → кейс →
-  ожидаемый статус/тело» — это план.
+- Take the contract (source B) or reconstruct it from the code. For EACH
+  endpoint write out: the method, the path, the required authorization/role, the
+  required and optional fields, the types, the success and error codes, the side
+  effects.
+- Design the matrix using the equivalence-classes + boundary-values + decision-
+  table techniques: for each endpoint — positive, negative, boundaries,
+  authorization (see the checklist). Lock it as a table "endpoint → case →
+  expected status/body" — this is the plan.
 
-### Шаг 3 — Спроектируй архитектуру и данные
+### Step 3 — Design the architecture and data
 
-- **HTTP-клиент/хелперы** в одном месте (базовый URL, заголовки, парсинг
-  ошибок) — не копируй сборку запроса в каждый тест.
-- **Фикстуры**: авторизованные клиенты для разных ролей, фабрики тестовых
-  сущностей (создать объект → вернуть id → удалить в teardown).
-- **Изоляция**: каждый тест независим, создаёт свои данные, чистит за собой;
-  проходит в любом порядке и параллельно. Не полагайся на данные от прошлого
-  прогона.
-- **Данные и окружение**: base URL, токены, креды — из env/конфига
-  (`.env`, `pytest` fixtures, `newman -e env.json`), секреты не в коде и не в
-  git.
+- **HTTP client/helpers** in one place (the base URL, headers, error parsing) —
+  don't copy request assembly into every test.
+- **Fixtures**: authorized clients for different roles, factories of test
+  entities (create an object → return the id → delete in teardown).
+- **Isolation**: each test is independent, creates its own data, cleans up after
+  itself; passes in any order and in parallel. Do not rely on data from a
+  previous run.
+- **Data and environment**: the base URL, tokens, credentials come from
+  env/config (`.env`, `pytest` fixtures, `newman -e env.json`), secrets not in
+  code and not in git.
 
-### Шаг 4 — Напиши тесты
+### Step 4 — Write the tests
 
-- Отдельный тест (или параметризованный кейс) на каждую строку матрицы.
-- Ассерты многослойные: статус → схема тела (валидация против
-  OpenAPI/JSON Schema/Pydantic) → конкретные значения → заголовки → побочный
-  эффект (запись в БД/очередь, если доступно проверить).
-- Негативные кейсы проверяют И код ошибки, И структуру тела ошибки
-  (машиночитаемый код/сообщение), И что мутация НЕ произошла.
-- Для схема-валидации используй существующий механизм проекта; если ничего
-  нет и есть OpenAPI — подключи валидатор (`schemathesis`/`jsonschema`)
-  точечно.
+- A separate test (or a parameterized case) for each row of the matrix.
+- Layered assertions: status → body schema (validation against
+  OpenAPI/JSON Schema/Pydantic) → specific values → headers → side effect (a
+  DB/queue write, if it can be checked).
+- Negative cases check the error code AND the structure of the error body (a
+  machine-readable code/message) AND that the mutation did NOT happen.
+- For schema validation use the project's existing mechanism; if there is none
+  and OpenAPI exists — wire in a validator (`schemathesis`/`jsonschema`)
+  narrowly.
 
-### Шаг 5 — Запусти и доведи до зелёного
+### Step 5 — Run and drive to green
 
-- Подними сервис (команда из README/docker-compose или заданный base URL),
-  подготовь тестовую БД/сиды.
-- Прогони раннер, чини реальные падения (неверный ожидаемый статус, кривая
-  фикстура, гонка данных). Прогони набор повторно, отсей флейки.
-- Приведи фактический вывод (passed/failed, время). Один раз сломай
-  проверяемое поведение и убедись, что тест краснеет — иначе ассерт фиктивен.
+- Bring up the service (the command from README/docker-compose or the given base
+  URL), prepare the test DB/seeds.
+- Run the runner, fix real failures (a wrong expected status, a broken fixture, a
+  data race). Run the suite again, weed out flakes.
+- Provide the actual output (passed/failed, duration). Break the behavior under
+  check once and confirm the test goes red — otherwise the assertion is fake.
 
-## ЧЕК-ЛИСТ ПОКРЫТИЯ НА КАЖДЫЙ ЭНДПОИНТ (применяй релевантное)
+## COVERAGE CHECKLIST FOR EACH ENDPOINT (apply what is relevant)
 
-### 1. Позитивные кейсы
-- Валидный запрос → корректный 2xx (200/201/204 по семантике метода).
-- Тело ответа соответствует схеме: все обязательные поля, корректные типы,
-  никаких лишних/утёкших полей (внутренние id, пароли, чужие данные).
-- Значения корректны: созданная сущность содержит именно переданные данные;
-  Location/заголовки для 201; пустое тело для 204.
+### 1. Positive cases
+- A valid request → the correct 2xx (200/201/204 per the method's semantics).
+- The response body matches the schema: all required fields, correct types, no
+  extra/leaked fields (internal ids, passwords, other people's data).
+- The values are correct: the created entity contains exactly the data passed;
+  Location/headers for 201; an empty body for 204.
 
-### 2. Негативные кейсы (валидация ввода)
-- Отсутствуют обязательные поля → 400/422 с указанием поля.
-- Неверные типы (строка вместо числа, null в non-nullable) → 4xx.
-- Невалидные значения (email/дата/enum вне допустимого) → 4xx с внятной
-  ошибкой.
-- Лишние/неизвестные поля — отклоняются или игнорируются по контракту (и
-  проверь mass-assignment: нельзя протолкнуть `role`/`is_admin`/`company_id`).
-- Битый JSON / неверный Content-Type → 400/415.
-- Несуществующий ресурс (`GET /items/{нет}`) → 404, а не 500.
-- Неверный метод на пути → 405.
+### 2. Negative cases (input validation)
+- Missing required fields → 400/422 identifying the field.
+- Wrong types (a string instead of a number, null in non-nullable) → 4xx.
+- Invalid values (email/date/enum out of range) → 4xx with a clear error.
+- Extra/unknown fields — rejected or ignored per the contract (and check
+  mass-assignment: `role`/`is_admin`/`company_id` must not be pushable).
+- Broken JSON / wrong Content-Type → 400/415.
+- A non-existent resource (`GET /items/{missing}`) → 404, not 500.
+- A wrong method on a path → 405.
 
-### 3. Граничные значения
-- Строки: пустая, 1 символ, максимальная длина, max+1 (ожидаем отказ),
-  спецсимволы/юникод/эмодзи.
-- Числа: 0, отрицательное, минимум/максимум диапазона, за границей.
-- Пагинация: `page/limit` = 0, 1, максимум, за пределом; пустая последняя
-  страница; `offset` за концом коллекции.
-- Пустые коллекции: `GET` списка без данных → 200 + пустой массив (не 404,
-  не null), корректная мета/тотал.
-- Большой payload: объём около лимита и за лимитом (413 при превышении).
+### 3. Boundary values
+- Strings: empty, 1 character, maximum length, max+1 (expect rejection),
+  special/unicode/emoji characters.
+- Numbers: 0, negative, the min/max of the range, out of bounds.
+- Pagination: `page/limit` = 0, 1, maximum, out of bounds; an empty last page;
+  `offset` past the end of the collection.
+- Empty collections: `GET` of a list with no data → 200 + an empty array (not
+  404, not null), correct meta/total.
+- Large payload: a size near the limit and past the limit (413 when exceeded).
 
-### 4. Авторизация и доступ
-- Без токена/с истёкшим/битым токеном → 401 (на КАЖДОМ защищённом
-  эндпоинте, включая «братьев»: если защитили POST, проверь DELETE/PATCH
-  того же ресурса).
-- Валидный токен, но недостаточная роль → 403.
-- **IDOR/BOLA**: под токеном пользователя A запросить объект пользователя/
-  компании B (подставив чужой id) → 403/404, НЕ 200 с чужими данными.
-- Мультитенантность (если применимо): ответ отфильтрован по
-  company_id/tenant_id из токена, не по параметру запроса.
-- Забытый открытый маршрут: эндпоинт, который должен требовать auth, но не
-  требует.
+### 4. Authorization and access
+- No token / an expired/broken token → 401 (on EVERY protected endpoint,
+  including the "siblings": if you protected POST, check DELETE/PATCH of the same
+  resource).
+- A valid token but an insufficient role → 403.
+- **IDOR/BOLA**: under user A's token request user/company B's object
+  (substituting another's id) → 403/404, NOT 200 with someone else's data.
+- Multitenancy (if applicable): the response is filtered by
+  company_id/tenant_id from the token, not by a request parameter.
+- A forgotten open route: an endpoint that should require auth but does not.
 
-### 5. Идемпотентность и семантика методов
-- Повтор POST на создание: задваивается ли сущность; если есть
-  Idempotency-Key — работает ли.
-- PUT/PATCH дважды одним телом → одинаковый итог, без побочных эффектов.
-- DELETE повторно → 404/204 согласованно, без 500.
-- GET — без побочных эффектов (не мутирует состояние).
+### 5. Idempotency and method semantics
+- A repeated POST for creation: does the entity get duplicated; if there is an
+  Idempotency-Key — does it work.
+- PUT/PATCH twice with the same body → an identical result, no side effects.
+- DELETE repeated → 404/204 consistently, without a 500.
+- GET — no side effects (does not mutate state).
 
-### 6. Коды статусов и заголовки
-- Ровно тот код, что предписан контрактом (201 на создание, не 200).
-- Заголовки: `Content-Type`, `Location`, `Cache-Control`, CORS,
-  security-заголовки, `ETag`/условные запросы, если предусмотрены.
-- `Retry-After` при 429/503, если применимо.
+### 6. Status codes and headers
+- Exactly the code prescribed by the contract (201 for creation, not 200).
+- Headers: `Content-Type`, `Location`, `Cache-Control`, CORS, security headers,
+  `ETag`/conditional requests, if provided for.
+- `Retry-After` on 429/503, if applicable.
 
-### 7. Контракт / схема ответа
-- Ответ валидируется против OpenAPI/GraphQL-схемы/JSON Schema — и для успеха,
-  и для ошибок.
-- Формат ошибки единый по проекту (одинаковая структура error-объекта на
-  всех эндпоинтах).
-- Для GraphQL: проверка `errors` vs `data`, частичный ответ, глубина/
-  сложность запроса, интроспекция (должна ли быть открыта).
+### 7. Contract / response schema
+- The response is validated against the OpenAPI/GraphQL schema/JSON Schema — for
+  both success and errors.
+- The error format is uniform across the project (the same error-object
+  structure on all endpoints).
+- For GraphQL: checking `errors` vs `data`, a partial response, query
+  depth/complexity, introspection (should it be open).
 
-### 8. Обработка ошибок сервера и устойчивость
-- Внутренняя ошибка не роняет 500 с утечкой стектрейса/SQL наружу; тело —
-  безопасное сообщение.
-- Недоступность зависимости (БД/внешний сервис) → 503/осмысленный код, не
-  повисание.
-- Rate limiting (если есть): после N запросов → 429; лимит сбрасывается по
-  окну.
+### 8. Server error handling and robustness
+- An internal error does not drop a 500 leaking a stack trace/SQL outward; the
+  body is a safe message.
+- Unavailability of a dependency (DB/external service) → 503/a meaningful code,
+  not a hang.
+- Rate limiting (if present): after N requests → 429; the limit resets by
+  window.
 
-### 9. Побочные эффекты (где доступно проверить)
-- Успешный POST/PUT — реально записал в БД (проверь через API чтения или
-  прямой запрос к тестовой БД).
-- Событие/сообщение в очередь опубликовано (если сервис это делает).
-- Неуспешный запрос НЕ оставил частичную запись (транзакционность).
+### 9. Side effects (where they can be checked)
+- A successful POST/PUT really wrote to the DB (check via a read API or a direct
+  query to the test DB).
+- An event/message was published to the queue (if the service does that).
+- A failed request left NO partial record (transactionality).
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ
+## EDGE CASES THAT ARE OFTEN MISSED
 
-- **Bulk-эндпоинт**: массовый вариант операции часто со слабее проверенной
-  авторизацией/валидацией, чем единичный; частичный успех (часть элементов
-  прошла, часть нет) — какой код и тело?
-- **Soft-deleted записи**: доступны ли через GET, участвуют ли в уникальности,
-  можно ли «создать» поверх удалённого.
-- **Гонки/конкурентность**: два параллельных POST с одним уникальным ключом —
-  один 201, второй 409, а не два 201 или 500.
-- **Числовая точность и переполнение**: деньги во float, очень большие числа,
-  отрицательные там, где не должно быть.
-- **Null vs отсутствие поля vs пустая строка** — трактуются ли по-разному;
-  PATCH с `null` очищает поле, а отсутствие поля — оставляет.
-- **Кодировки и инъекции в параметрах**: спецсимволы SQL/NoSQL в фильтрах,
-  path traversal в path-параметре, очень длинный query.
-- **Согласованность пагинации**: одинаковый ли порядок между страницами;
-  дубликаты/пропуски при добавлении данных между запросами.
-- **Часовые пояса и формат дат**: наивная vs aware дата, разные форматы на
-  входе, `created_at` в UTC vs локали.
-- **Регистр и trailing slash в путях**: `/Items` vs `/items`, `/items/` vs
-  `/items` — 200 vs 404 vs редирект.
-- **Условные/частичные ответы**: `If-None-Match`/304, `Range`-запросы, если
-  поддерживаются.
-- **Устаревший/дублирующий маршрут**: старый эндпоинт остался после
-  рефакторинга, не обновлён под новую авторизацию.
-- **Идемпотентность вебхука/консьюмера**: если сервис принимает вебхуки —
-  повтор того же события не должен задваивать эффект.
+- **Bulk endpoint**: the batch variant of an operation often has weaker checked
+  authorization/validation than the single one; partial success (some items
+  passed, some did not) — what code and body?
+- **Soft-deleted records**: are they accessible via GET, do they participate in
+  uniqueness, can you "create" over a deleted one.
+- **Races/concurrency**: two parallel POSTs with one unique key — one 201, the
+  other 409, not two 201s or a 500.
+- **Numeric precision and overflow**: money in float, very large numbers,
+  negatives where they shouldn't be.
+- **Null vs missing field vs empty string** — are they treated differently;
+  PATCH with `null` clears the field, while a missing field leaves it.
+- **Encodings and injections in parameters**: SQL/NoSQL special characters in
+  filters, path traversal in a path parameter, a very long query.
+- **Pagination consistency**: is the order the same across pages;
+  duplicates/gaps when data is added between requests.
+- **Time zones and date format**: naive vs aware date, different input formats,
+  `created_at` in UTC vs locale.
+- **Case and trailing slash in paths**: `/Items` vs `/items`, `/items/` vs
+  `/items` — 200 vs 404 vs redirect.
+- **Conditional/partial responses**: `If-None-Match`/304, `Range` requests, if
+  supported.
+- **A stale/duplicate route**: an old endpoint left after a refactor, not
+  updated for the new authorization.
+- **Webhook/consumer idempotency**: if the service accepts webhooks — a repeat of
+  the same event must not duplicate the effect.
 
-## КРИТЕРИИ ГОТОВНОСТИ (Definition of Done)
+## DEFINITION OF DONE
 
-1. Написан в конвенции существующего стека API-тестов (или согласованного,
-   если стека не было).
-2. На каждый эндпоинт из SCOPE есть позитив, негатив, границы и авторизация
-   (релевантные блоки чек-листа); контракт-валидация подключена, если есть
-   схема.
-3. Ассерты многослойные (статус + схема + значения + побочный эффект), не
-   фиктивные — тест краснеет при поломке поведения.
-4. Тесты изолированы, чистят данные, проходят в любом порядке, не бьют в
-   прод.
-5. **Прогон зелёный и стабильный** — приведён фактический вывод раннера;
-   набор прогнан ≥2 раз без флейков.
-6. Секреты/base URL/токены — из env/конфига, не в коде.
-7. Есть раздел «что не покрыто и почему».
+1. It is written in the convention of the project's existing API-testing stack
+   (or the agreed-upon one, if there was no stack).
+2. For each endpoint in the SCOPE there is a positive, negative, boundaries, and
+   authorization (the relevant checklist blocks); contract validation is wired
+   in, if a schema exists.
+3. The assertions are layered (status + schema + values + side effect), not fake
+   — the test goes red when the behavior breaks.
+4. The tests are isolated, clean up data, pass in any order, do not hit prod.
+5. **The run is green and stable** — the actual runner output is provided; the
+   suite was run ≥2 times without flakes.
+6. Secrets/base URL/tokens come from env/config, not in the code.
+7. There is a "what is not covered and why" section.
 
-## ФОРМАТ РЕЗУЛЬТАТА
+## RESULT FORMAT
 
-1. **Вердикт одной фразой**: набор готов и зелёный / готов с оговорками /
-   не готов (почему).
-2. **SCOPE**: список эндпоинтов (метод + путь), выбранный стек, источник
-   контракта (OpenAPI/восстановлен по коду), base URL, способ авторизации.
-3. **Матрица покрытия**: таблица «эндпоинт → кейс (позитив/негатив/граница/
-   авторизация) → ожидаемый статус → файл теста → статус (pass/fail/не
-   запускался)».
-4. **Созданные/изменённые файлы**: полные пути к тестам, фикстурам, клиенту,
-   конфигам.
-5. **Вывод фактического прогона**: команда, сводка passed/failed, время,
-   подтверждение стабильности.
-6. **Несоответствия контракту** (если найдены): эндпоинт возвращает не то,
-   что в схеме/ТЗ — это находки, а не только «тест написан».
-7. **Что НЕ покрыто и почему**: нет тестовой БД/окружения, нет прав на
-   создание данных, эндпоинт требует внешней интеграции/платёжного шлюза,
-   нет схемы для валидации — честно.
-8. **Рекомендации**: что добавить в CI, где нужен OpenAPI/схема, какие
-   эндпоинты требуют контракт-тестов, какие побочные эффекты стоит проверять
-   напрямую.
+1. **One-sentence verdict**: the suite is done and green / done with caveats /
+   not done (why).
+2. **SCOPE**: the list of endpoints (method + path), the chosen stack, the
+   contract source (OpenAPI/reconstructed from code), the base URL, the
+   authorization method.
+3. **Coverage matrix**: a table "endpoint → case
+   (positive/negative/boundary/authorization) → expected status → test file →
+   status (pass/fail/not run)".
+4. **Files created/changed**: full paths to tests, fixtures, the client, configs.
+5. **Actual run output**: the command, the passed/failed summary, duration,
+   confirmation of stability.
+6. **Contract mismatches** (if found): an endpoint returns something other than
+   what is in the schema/requirements — these are findings, not just "a test was
+   written".
+7. **What is NOT covered and why**: no test DB/environment, no permission to
+   create data, the endpoint requires an external integration/payment gateway, no
+   schema to validate against — honestly.
+8. **Recommendations**: what to add to CI, where OpenAPI/a schema is needed,
+   which endpoints require contract tests, which side effects are worth checking
+   directly.
 
-## ЗАПУСК (практическая инструкция)
+## EXECUTION (practical instructions)
 
-1. **Сам, в основном потоке**: выполни SCOPE и Шаг 1 (стек) + Шаг 2 (сбор
-   контракта, матрица) — это нельзя делегировать, субагент не видит контекст
-   диалога и не знает, какие эндпоинты, где сервис и откуда токен. Зафиксируй
-   SCOPE, стек, источник контракта.
-2. Спроектируй архитектуру и фикстуры (Шаг 3) — единое решение по всему
-   набору; общий HTTP-клиент/фикстуры создай ДО распараллеливания.
-3. **Написание**: если эндпоинтов много и они независимы и доступен Agent
-   tool — распараллель по группам эндпоинтов (по ресурсу/роутеру): каждому
-   субагенту передай конкретный список эндпоинтов, выбранный стек и
-   конвенцию, релевантные разделы этого скилла (чек-лист, edge cases, DoD),
-   путь к общему клиенту/фикстурам — субагент не видит сам файл скилла.
-4. **Запуск и починка** (Шаг 5) сведи в основном потоке: подними сервис и
-   тестовую БД один раз, прогони весь набор, чини падения, добейся стабильной
-   зелени. Сохраняй тесты сразу в тестовую директорию проекта по его
-   конвенции (`tests/`, `tests/api/`, `__tests__/`, Postman-коллекция рядом).
-5. Приведи фактический вывод прогона и заполни раздел «что не покрыто».
+1. **Yourself, in the main thread**: do the SCOPE and Step 1 (stack) + Step 2
+   (assembling the contract, the matrix) — this cannot be delegated, a subagent
+   cannot see the conversation context and does not know which endpoints, where
+   the service is, and where the token comes from. Lock the SCOPE, the stack, the
+   contract source.
+2. Design the architecture and fixtures (Step 3) — a single decision across the
+   whole suite; create the shared HTTP client/fixtures BEFORE parallelizing.
+3. **Writing**: if there are many endpoints and they are independent and the
+   Agent tool is available — parallelize by endpoint group (by resource/router):
+   hand each subagent a specific list of endpoints, the chosen stack and
+   convention, the relevant sections of this skill (checklist, edge cases, DoD),
+   and the path to the shared client/fixtures — a subagent cannot see the skill
+   file itself.
+4. **Running and fixing** (Step 5) converge in the main thread: bring up the
+   service and the test DB once, run the whole suite, fix failures, achieve
+   stable green. Save the tests straight into the project's test directory per
+   its convention (`tests/`, `tests/api/`, `__tests__/`, a Postman collection
+   alongside).
+5. Provide the actual run output and fill in the "what is not covered" section.
 
-Артефакты — в тестовую директорию проекта по его конвенции; если своей
-структуры нет, заведи `tests/api/` с подпапками `fixtures/`/`schemas/`.
-Матрицу покрытия, если нужен отдельный документ, клади в
+Artifacts go into the project's test directory per its convention; if it has no
+structure of its own, set up `tests/api/` with `fixtures/`/`schemas/` subfolders.
+The coverage matrix, if a separate document is needed, goes into
 `docs/qa/test-plans/<feature-slug>.md`.
 
-Это авторский скилл: код тестов пиши так, чтобы он реально проходил, был
-детерминированным и поддерживаемым — не «заглушки ради галочки».
-Несоответствия реализации контракту/требованиям фиксируй как находки.
+This is an authoring skill: write the test code so it actually passes, is
+deterministic and maintainable — not "stubs for the sake of a checkmark". Record
+mismatches between the implementation and the contract/requirements as findings.
+

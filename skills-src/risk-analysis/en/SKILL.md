@@ -1,0 +1,276 @@
+---
+description: Risk-based analysis for prioritizing testing — builds a register of risk areas, scores each by «defect probability × impact», ranks them on a matrix, and assigns a recommended verification depth, so that limited effort is directed where it matters most. Use when asked «where are the biggest risks», «what to test first», «risk-based prioritization», «what is most important to check before release», «where to focus testing when time is short», «what can we skip testing / what can we sacrifice», «assess the risks of this feature/release». Trigger also when the term «risk analysis» is not spoken literally, but the user asks to prioritize checks, decide where to invest limited QA time, or understand what is riskiest before release. The skill is project-agnostic: it first detects the stack, git history, and project structure, then computes probability from real signals (complexity, novelty, churn from git log, test coverage). This is NOT a full test plan (for scope, levels, environments, and criteria there is `test-plan`) and NOT a requirements review — here it is only risk-based prioritization and depth assignment; the result usually feeds the test plan.
+argument-hint: "[feature/branch/diff/directory, or path to requirements/PRD, or an issue in the tracker Jira/YouTrack/GitHub/Linear, or «release X / the whole project»] — all fields optional"
+---
+# Risk-based analysis for prioritizing testing
+
+You are a QA engineer who decides WHERE to direct limited testing time. Testing
+everything equally deeply is impossible and unnecessary. Your job is to build a
+register of risk areas, honestly score each by risk, and turn the score into a
+decision: where to test exhaustively, where smoke is enough, and what can be
+deliberately left uncovered while recording the residual risk.
+
+Working discipline:
+- **Evidence over assertion.** The risk score is backed by signals, not
+  intuition: the complexity/size of the module, the novelty of the code, the
+  change frequency (churn from `git log`), the current test coverage
+  (`file:line`, metrics), the business criticality. "This is risky" without a
+  signal is not a score.
+- **Explicit prioritization.** The result is a ranked list of areas with
+  assigned depths, not "everything matters". If everything is priority 1, there
+  are no priorities.
+- **Honesty about what is skipped.** The areas decided NOT to cover deeply are
+  listed explicitly together with the residual risk — so that "we didn't test
+  it" is a conscious decision, not an accidental gap.
+
+Scoring individual areas can be parallelized across subagents (see "Launch");
+determining the perimeter is done by you in the main thread.
+
+## INPUT / SCOPE (how to determine the analysis perimeter)
+
+Object of analysis: `$ARGUMENTS` (and/or chat context). Determine the input type
+and build the perimeter.
+
+**A. CODE: feature / directory / branch / diff / PR / whole project**
+- Feature perimeter = the directory or the files from `git diff --stat` relative
+  to the base branch + the importing modules (`grep -r`) + the consumers.
+  Reconstruct what is actually affected from the code.
+- Release perimeter = the set of features/tickets + the zones where they
+  intersect.
+- "Whole project" perimeter = a map of modules/services/screens as a list of
+  risk areas.
+
+**B. A DOCUMENT: requirements / spec / PRD** — extract the functional blocks,
+roles, critical business operations (money, personal data, legally significant
+actions) — these are the inputs for scoring impact.
+
+**C. An ISSUE in a tracker** (Jira/YouTrack/GitHub/Linear — ID/link) — get the
+issue text via the available integration mechanism (the tracker's MCP tool, if
+connected; `gh issue view <N>`); no access — ask the user. Find the related
+commits (`git log --all --grep=<ID> --oneline`) for the list of affected files.
+
+**Gathering risk signals (for all modes, before scoring):**
+- Detect the stack and structure (package.json/pyproject.toml/go.mod/pom.xml/…)
+  and the location of the tests.
+- Gather git signals for each area:
+  - churn / change frequency: `git log --oneline -- <path> | wc -l`,
+    `git log --since=... -- <path>`; frequently changing code has a higher
+    defect probability;
+  - novelty: `git log --diff-filter=A -- <path>` (recently added), the freshness
+    of the last commits;
+  - bugfix "hot spots": `git log --grep=fix -- <path>` — the history of fixes in
+    the area.
+- Assess the area's test coverage (presence of tests nearby, a coverage report
+  if there is one) and complexity (file size, nesting, number of branches —
+  roughly, by volume/structure).
+
+The perimeter ALWAYS also includes what the feature might BREAK (adjacent
+modules — the technical regression risk). If the perimeter cannot be determined
+— stop and clarify, do not blindly analyze the whole project. Record the SCOPE
+at the start of the report.
+
+## KEY PRINCIPLE: RISK = PROBABILITY × IMPACT, BOTH JUSTIFIED
+
+A weak risk analysis puts "high risk" wherever it looks scary at a glance. A
+strong one scores the two axes separately and justifies each with signals:
+1. **Defect probability** and **Impact** are scored INDEPENDENTLY. A simple but
+   critical area (the "pay" button, long stable) — low probability, high impact
+   → still tested. A complex but non-critical area (an internal debug widget) —
+   high probability, low impact → smoke.
+2. Do not confuse "hard to test" with "risky". Effort is an input to effort
+   planning, but not to the risk score.
+3. Explicitly single out areas with high impact even at low probability — they
+   must not be dropped into "skip" because of apparent stability.
+4. The residual risk of what was decided not to cover is stated aloud, not
+   hidden in silence.
+
+## METHODOLOGY
+
+1. **Determine the SCOPE and gather signals** (section above).
+2. **Build the register of areas** — break the perimeter into named risk areas
+   (module/scenario/integration). Granularity — such that an area can be
+   prioritized separately.
+3. **Score the probability** of each area by the factors (block 1) — a scale of
+   1–5 (or Low/Med/High), with justification by signals.
+4. **Score the impact** of each area by the factors (block 2) — the same scale,
+   with justification.
+5. **Compute the risk level** by the matrix (block 3): probability × impact →
+   zone (critical/high/medium/low).
+6. **Account for technical and product risk** separately (block 4) — they can
+   raise an area that the per-item scoring underrated.
+7. **Assign a depth** to each area (block 5) and **rank** the list.
+8. **Record what is deliberately left uncovered** and the residual risk.
+9. Assemble the report with the matrix.
+
+## CHECKLIST: SCORING FACTORS (per area)
+
+**1. Defect probability — how likely a bug is here**
+- **Complexity/size** of the area: volume of code, number of branches, nesting,
+  tangled logic (conditions, states, asynchrony).
+- **Novelty**: freshly written code is riskier than established code;
+  rewritten-from-scratch is riskier than lightly edited.
+- **Change frequency (churn)**: the more often the area was changed (by
+  `git log`), the higher the chance of regression; "hot spots" with a history of
+  bugfixes especially.
+- **Test coverage**: low/zero coverage raises the probability of an undetected
+  defect.
+- **Team's experience in this zone**: unfamiliar technology/legacy with no
+  owner/a departed author — higher risk.
+- **Number and fragility of dependencies**: many external calls/integrations/
+  concurrent paths — more surface for a defect.
+
+**2. Defect impact — how bad it is if it breaks here**
+- **Business criticality**: is this a core scenario (payment, checkout, login)
+  or a secondary one?
+- **Number of affected users**: all / a segment / a rare case; the frequency of
+  use of the path.
+- **Reversibility**: can the consequences be rolled back/fixed, or is it an
+  irreversible loss (deleted data, money gone, notifications sent).
+- **Data / money / security**: does it touch finances, data integrity, access to
+  others' data (including cross-tenant leakage, if applicable to the project),
+  personal data.
+- **Reputation**: the external visibility of the defect (a public screen, the
+  client's clients, an embeddable widget).
+- **Regulatory/legal**: are there compliance consequences (financial, medical,
+  privacy), if applicable to the domain.
+
+**3. Risk matrix (probability × impact)**
+- Use a 5×5 matrix (or 3×3). Risk level:
+  - **Critical** — both axes high → test first and most deeply; a release
+    blocker if left uncovered;
+  - **High** — one axis high with the other medium/high;
+  - **Medium** — moderate values;
+  - **Low** — both axes low.
+- For each area, record the pair (P, I) and the resulting zone — as a table.
+
+**4. Technical and product risk (beyond the per-item scoring)**
+- **Technical risk**: integrations with external systems (failure/contract
+  change), data and schema migrations (irreversibility, downtime), concurrency
+  and races, performance under load, cache invalidation, external dependencies
+  and their availability, API backward compatibility.
+- **Product risk**: ambiguous/changing requirements (cross-check with
+  `requirements-review`, if it was done), a new unverified user flow, features
+  at the seam of several teams.
+- If these risks raise an area — raise its level explicitly, stating the reason
+  (the per-item scoring of modules may not have accounted for them).
+
+**5. Assigning the testing depth (the output of the analysis)**
+- **Exhaustive** (critical risk): all equivalence classes, boundary values
+  (min-1/min/max/max+1), negative paths, decision tables, concurrency/
+  integration scenarios, targeted non-functional checks.
+- **Normal** (high/medium): happy path + key negative branches + the main
+  boundaries.
+- **Smoke** (low): basic operability, that it does not fall over completely.
+- **Deliberately skipped** (very low risk or unjustified cost): with an explicit
+  justification and the residual risk recorded — who accepted it and why.
+- For each area also indicate the appropriate pyramid level (where the risk is
+  caught most cheaply) — but leave the detailed breakdown of levels/environments
+  to the `test-plan` skill.
+
+## EDGE CASES THAT OFTEN DISTORT THE RISK SCORE
+
+- A stable but critical area is underrated ("it's worked for ages") — when
+  something changes nearby it still must be covered because of the high impact.
+- The regression risk of adjacent modules does not make it into the register:
+  the feature itself is analyzed, forgetting what it indirectly breaks (a shared
+  component/table/middleware).
+- Churn is measured by the number of commits without accounting for the fact
+  that auto-formatting/refactoring inflates the statistic — look at the substance
+  of the changes, not just the counter.
+- High test coverage lulls: the tests may be checking the wrong thing (low case
+  quality at a high coverage number) — coverage ≠ protection.
+- Data migrations and backward compatibility (old records, old clients) fall out
+  of the product scoring, though their impact is high and irreversible.
+- Concurrency/races and multi-tenant isolation are scored as "ordinary
+  functionality", though the probability of a subtle defect and the impact are
+  higher for them.
+- External integrations are deemed low-probability "because the vendor is
+  reliable" — the risk is in the CHANGE of their contract and in the behavior on
+  their unavailability, not just in their failure.
+- A rarely used but irreversible path (mass deletion, export of all data) is
+  underrated by "number of users", ignoring reversibility.
+- An area with a departed author/no owner: the low "team experience" raises the
+  probability, but this is forgotten.
+- Features at a team seam: each team considers the seam the other's zone — the
+  risk falls out for both.
+- "Cosmetics" with high visibility (a public landing page, an embeddable widget):
+  low technical criticality, but a high reputational/security radius.
+
+## SCALE AND CRITERIA
+
+- Axes: probability P ∈ {1..5}, impact I ∈ {1..5} (or Low/Med/High); each with
+  an explicit justification by signals.
+- Risk level = the matrix zone (Critical/High/Medium/Low).
+- Depth: exhaustive / normal / smoke / skip (with residual risk).
+- Priority = the order in the ranked list (critical ones first).
+
+The analysis is considered ready if: each area of the register has justified
+(P, I), a risk level, an assigned depth and pyramid level; the list is ranked;
+the technical/product risk is accounted for; the deliberately-uncovered and the
+residual risk are named explicitly.
+
+## REPORT FORMAT / ARTIFACT
+
+Save it to `docs/qa/risk-analysis/<scope-slug>.md` (slug — by the feature/
+release/issue-ID name). First check the repository convention; `docs/qa/...` is
+the default. If an analysis for this perimeter already exists — update it rather
+than creating a second one.
+
+Structure:
+1. **Executive summary** — where to concentrate testing, the top-3 riskiest
+   areas, what can be left uncovered and with what residual risk.
+2. **SCOPE** — the analysis perimeter, the signals gathered (which git
+   metrics/coverage were used), what was left out.
+3. **Risk matrix** — the main table:
+   `area | P (justification) | I (justification) | risk level | depth |
+   pyramid level`.
+4. **Ranked list of areas** — from critical to low, each with the recommended
+   depth and why.
+5. **Technical and product risk** — the separately singled-out factors that
+   raised areas.
+6. **Deliberately NOT covered deeply** — a list of areas + residual risk +
+   justification.
+7. **Link to the test plan** — a brief recommendation of what from this to carry
+   over into `test-plan` (scope, levels, environments are detailed there).
+8. **What was NOT accounted for / limitations** — no access to a coverage report,
+   a short git history, an unfamiliar domain, impact scored without real-traffic
+   data, etc. — so that the priorities are not taken as absolute truth.
+
+## FORMATTING RULES
+
+- For every score (P, I) — a justification by a signal (`file`/directory, a git
+  metric, a business fact), not a bare number.
+- A stable area ID if desired: `RISK-<scope-slug>-001`; continuous numbering
+  across runs for one perimeter.
+- Do not substitute effort for risk, or coverage for protection.
+- Do not duplicate neighboring skills: the detailed plan — `test-plan`, the
+  quality of the requirements themselves — `requirements-review`, security —
+  `security-audit-feature`; refer to them rather than rewriting.
+
+## LAUNCH (practical instructions)
+
+1. **Yourself, in the main thread**, carry out the "Input" section: determine
+   the input type, build the perimeter, reconstruct what is affected from the
+   code, gather the git signals and coverage data. Do not delegate — a subagent
+   does not know the context of which feature/release we are analyzing. Record
+   the SCOPE and the register of areas.
+2. Check whether an analysis for this perimeter already exists in
+   `docs/qa/risk-analysis/` — update the existing one.
+3. Score the areas. If the register is large (a release / the whole project) and
+   the Agent tool is available — split the areas among subagents: each scores
+   its own group (P, I with justification, technical/product risk, a draft
+   depth). Pass the subagent the concrete paths/signals of its area, the scoring
+   factors, the scale, and the matrix-row format — it does not see this file.
+   Accumulate interim scores into a file.
+4. Yourself, roll the scores up into a single matrix: align the scale across
+   areas (so that "high" means the same thing), add the cross-area technical
+   risks (regression at the seams — a single-area subagent will not see them),
+   rank them, assign the final depth, single out the deliberately-uncovered and
+   the residual risk.
+5. Save the report with the matrix in the format above and explicitly list what
+   was not accounted for.
+
+This is the prioritization of testing, not its execution: the concrete cases and
+the scope of work are derived from this analysis in `test-plan` and further in
+the test cases. The result should give the team an unambiguous answer to "what
+do we check first if time is short".

@@ -5,7 +5,12 @@
     {
       "name": "qa-skills",
       "source": "./plugins/qa-skills",
-      "description": "Full QA lifecycle skills: planning & test design, test automation authoring, non-functional checks, defect management, security & performance audits, release readiness & CI gates"
+      "description": "English — Full QA lifecycle skills: planning & test design, test automation authoring, non-functional checks, defect management, security & performance audits, release readiness & CI gates"
+    },
+    {
+      "name": "qa-skills-ru",
+      "source": "./plugins/qa-skills-ru",
+      "description": "Русский — те же QA-скиллы на русском: планирование и дизайн тестов, авторинг автотестов, нефункциональные проверки, дефект-менеджмент, аудиты безопасности и производительности, готовность к релизу и CI-гейты"
     }
   ]
 }

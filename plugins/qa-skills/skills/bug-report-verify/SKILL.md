@@ -1,82 +1,83 @@
 ---
 name: bug-report-verify
-description: Адверсариально проверяет валидность баг-репорта — не оформление, а саму проблему по первоисточникам (код, спека, git history), с попыткой опровергнуть репорт прежде чем подтвердить его. Используй, когда просят проверить/провалидировать/подтвердить баг-репорт, усомниться в баг-репорте, или перед тем как начинать работу над заведённым багом, чтобы убедиться что он реальный, а не галлюцинация агента.
-argument-hint: "[путь к файлу баг-репорта | вставленный текст репорта]"
+description: Adversarially checks the validity of a bug report — not the formatting, but the problem itself against primary sources (code, spec, git history), trying to disprove the report before confirming it. Use when asked to check/validate/confirm a bug report, to doubt a bug report, or before starting work on a filed bug to make sure it is real and not an agent's hallucination.
+argument-hint: "[path to the bug report file | pasted report text]"
 disallowed-tools: Edit, Write
 ---
 
-# Верификация валидности баг-репорта
+# Bug report validity verification
 
-Твоя задача — НЕ проверка оформления, а адверсариальная верификация самой
-проблемы. Исходи из презумпции, что репорт может быть галлюцинацией агента
-или ложным выводом на основе неполного контекста. Твоя цель — попытаться
-ОПРОВЕРГНУТЬ репорт, и только если опровергнуть не удалось — подтвердить его.
+Your task is NOT to check formatting, but to adversarially verify the
+problem itself. Assume that the report may be an agent's hallucination
+or a false conclusion drawn from incomplete context. Your goal is to try
+to DISPROVE the report, and only if you cannot disprove it — confirm it.
 
-## Входные данные
+## Input
 
-`$ARGUMENTS` — путь к файлу баг-репорта или сам текст репорта.
+`$ARGUMENTS` — path to the bug report file or the report text itself.
 
-- Если аргумент похож на путь (`docs/bugs/**`, `*.md`, `*.txt`) — прочитай файл.
-- Если это текст репорта, вставленный прямо в сообщение, — используй его как есть.
-- Если аргумент пуст — возьми баг-репорт из последнего сообщения пользователя
-  в диалоге; если и там его нет, спроси, какой репорт проверить (не выдумывай).
+- If the argument looks like a path (`docs/bugs/**`, `*.md`, `*.txt`) — read the file.
+- If it is the report text pasted directly into the message — use it as is.
+- If the argument is empty — take the bug report from the user's last message
+  in the conversation; if it is not there either, ask which report to check (do not invent one).
 
-## Порядок работы
+## How to proceed
 
-1. **Извлеки утверждения.** Разбей репорт на атомарные фактические утверждения:
-   - что именно воспроизводится (шаги, входные данные, окружение);
-   - какое поведение наблюдается (actual);
-   - какое поведение ожидается (expected) и НА ЧЁМ основано это ожидание
-     (спека, документация, код, здравый смысл автора репорта?);
-   - какая причина/локализация заявлена (если заявлена).
+1. **Extract the claims.** Break the report down into atomic factual claims:
+   - what exactly reproduces (steps, input data, environment);
+   - what behavior is observed (actual);
+   - what behavior is expected (expected) and WHAT that expectation is based on
+     (spec, documentation, code, the report author's common sense?);
+   - what cause/localization is asserted (if any).
 
-2. **Проверь каждое утверждение независимо, по первоисточникам:**
-   - найди в коде реальную реализацию описанного поведения — читай код, а не
-     пересказ в репорте; упомянутые файлы/функции/эндпоинты/конфиги должны
-     существовать и делать то, что заявлено;
-   - проверь, что "ожидаемое поведение" действительно ожидаемо: есть ли
-     требование/спека/контракт, или автор репорта сам его придумал;
-   - проверь, не является ли поведение намеренным (feature, известное
-     ограничение, осознанный trade-off — ищи комментарии, ADR, git log/blame,
-     существующие тикеты и доки);
-   - проверь, не устарел ли репорт: возможно, проблема уже исправлена в
-     текущей ветке.
+2. **Check each claim independently, against primary sources:**
+   - find the actual implementation of the described behavior in the code — read the
+     code, not the retelling in the report; the mentioned files/functions/endpoints/configs
+     must exist and do what is claimed;
+   - verify that the "expected behavior" is actually expected: is there a
+     requirement/spec/contract, or did the report author make it up;
+   - check whether the behavior is intentional (a feature, a known
+     limitation, a deliberate trade-off — look for comments, ADRs, git log/blame,
+     existing tickets and docs);
+   - check whether the report is stale: maybe the problem has already been fixed in
+     the current branch.
 
-3. **Воспроизведи проблему.** Если это возможно в текущем окружении — выполни
-   шаги воспроизведения (запусти код, тест, запрос, скрипт) и зафиксируй
-   фактический результат. Если воспроизвести напрямую нельзя — напиши
-   минимальный тест/скрипт, изолирующий заявленное поведение, и прогони его.
-   Если воспроизведение невозможно в принципе (нужен прод, внешний сервис,
-   специфичные данные) — явно скажи это и оцени проблему только по коду,
-   пометив вывод как косвенный.
+3. **Reproduce the problem.** If possible in the current environment — execute
+   the reproduction steps (run the code, test, request, script) and record the
+   actual result. If it cannot be reproduced directly — write a
+   minimal test/script that isolates the claimed behavior, and run it.
+   If reproduction is impossible in principle (requires prod, an external service,
+   specific data) — say so explicitly and assess the problem from the code only,
+   marking the conclusion as indirect.
 
-4. **Проверь выводы, а не только факты.** Даже если наблюдаемое поведение
-   реально, заявленная причина может быть неверной. Отдельно оцени:
-   наблюдение (симптом) vs интерпретацию (диагноз) — они подтверждаются
-   независимо.
+4. **Check the conclusions, not just the facts.** Even if the observed behavior
+   is real, the asserted cause may be wrong. Separately assess:
+   observation (symptom) vs interpretation (diagnosis) — they are confirmed
+   independently.
 
-## Вердикт
+## Verdict
 
-Дай один из вердиктов с обоснованием:
+Give one of the verdicts with justification:
 
-- **ПОДТВЕРЖДЁН** — проблема воспроизведена / однозначно доказана кодом.
-  Приложи доказательства: вывод воспроизведения, ссылки на код (file:line).
-- **ПОДТВЕРЖДЁН ЧАСТИЧНО** — симптом реален, но причина/масштаб/ожидаемое
-  поведение в репорте описаны неверно. Укажи, что именно скорректировать.
-- **НЕ ПОДТВЕРЖДЁН** — проблема не воспроизводится или репорт основан на
-  ложной посылке. Объясни, откуда взялся ложный вывод (какой контекст
-  автор репорта не учёл).
-- **НЕДОСТАТОЧНО ДАННЫХ** — перечисли конкретные вопросы/данные, без которых
-  верификация невозможна (окружение, версия, входные данные, доступы).
+- **CONFIRMED** — the problem was reproduced / unambiguously proven by the code.
+  Attach evidence: reproduction output, code references (file:line).
+- **PARTIALLY CONFIRMED** — the symptom is real, but the cause/scope/expected
+  behavior in the report are described incorrectly. State exactly what to correct.
+- **NOT CONFIRMED** — the problem does not reproduce or the report is based on
+  a false premise. Explain where the false conclusion came from (what context
+  the report author overlooked).
+- **INSUFFICIENT DATA** — list the specific questions/data without which
+  verification is impossible (environment, version, input data, access).
 
-## Требования к ответу
+## Requirements for the response
 
-- Каждый вывод — только со ссылкой на доказательство: код (file:line),
-  вывод команды, результат теста. Утверждения без доказательств запрещены.
-- Если уверенность не 100% — явно укажи степень уверенности и что осталось
-  непроверенным.
-- НЕ исправляй баг и не меняй код (кроме временных тестов/скриптов для
-  воспроизведения — их удали после проверки). Инструменты редактирования
-  файлов недоступны этому скиллу намеренно — это read-only аудит.
-- Если репорт частично неверен — сформулируй уточнения/правки к репорту,
-  чтобы он стал корректным.
+- Every conclusion — only with a reference to evidence: code (file:line),
+  command output, test result. Claims without evidence are forbidden.
+- If your confidence is not 100% — explicitly state the degree of confidence and what
+  remains unverified.
+- Do NOT fix the bug and do not change the code (except temporary tests/scripts for
+  reproduction — delete them after checking). File editing tools are
+  intentionally unavailable to this skill — this is a read-only audit.
+- If the report is partially incorrect — formulate the clarifications/edits to the report
+  that would make it correct.
+

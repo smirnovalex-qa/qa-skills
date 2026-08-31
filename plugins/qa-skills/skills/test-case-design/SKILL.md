@@ -1,277 +1,285 @@
 ---
 name: test-case-design
-description: Проектирует полный набор тест-кейсов из требований/фичи по формальным техникам тест-дизайна (эквивалентное разбиение, граничные значения, таблицы решений, state transition, pairwise, use-case, error guessing) с трассируемостью требование→кейс, приоритетами P0/P1/P2 и позитивными/негативными/граничными кейсами. Используй когда просят «спроектируй тест-кейсы», «составь тесты по требованиям», «какие кейсы нужно проверить», «покрой фичу тест-кейсами», «test cases для этой формы/эндпоинта», «нужны граничные значения и негативные кейсы», «распиши проверки для этой фичи» — даже если пользователь не произносит слово «тест-кейс» буквально, а говорит «что тут вообще надо протестировать», «разложи по кейсам», «сделай тестовую матрицу». Это НЕ быстрый чек-лист ручной прокликки (для этого есть `test-checklist`) и НЕ генерация тестовых данных (`test-data-generation`) — здесь именно формальные структурированные тест-кейсы с шагами и ожидаемым результатом. Артефакт сохраняется в `docs/qa/test-cases/`, код проекта не трогается.
-argument-hint: "[путь к директории/фиче, путь к документу-требованиям/ТЗ/PRD, или issue ID/ссылка в трекере]"
+description: Designs a complete set of test cases from requirements/a feature using formal test-design techniques (equivalence partitioning, boundary values, decision tables, state transition, pairwise, use-case, error guessing) with requirement→case traceability, P0/P1/P2 priorities, and positive/negative/boundary cases. Use when asked to "design test cases", "write tests from the requirements", "which cases need to be checked", "cover this feature with test cases", "test cases for this form/endpoint", "we need boundary values and negative cases", "lay out the checks for this feature" — even if the user does not say the phrase "test case" literally, but says "what actually needs testing here", "break this down into cases", "build a test matrix". This is NOT a quick manual click-through checklist (use `test-checklist` for that) and NOT test data generation (`test-data-generation`) — here it is specifically formal, structured test cases with steps and an expected result. The artifact is saved to `docs/qa/test-cases/`; project code is not touched.
+argument-hint: "[path to a directory/feature, path to a requirements doc/spec/PRD, or issue ID/link in the tracker]"
 disallowed-tools: Edit
 ---
 
-# Проектирование тест-кейсов по формальным техникам
+# Designing test cases with formal techniques
 
-Ты QA-инженер по тест-дизайну. Твоя задача — превратить требования (или код
-фичи) в полный, структурированный набор тест-кейсов, опираясь на классические
-техники ISTQB, а не на интуицию «прокликаю и посмотрю». Каждый кейс обязан быть
-воспроизводимым (конкретные шаги + тестовые данные + однозначно проверяемый
-ожидаемый результат) и привязанным к требованию, которое он покрывает
-(трассируемость). Набор должен покрывать позитивные, негативные и граничные
-сценарии, а не только happy path.
+You are a QA test-design engineer. Your task is to turn requirements (or a
+feature's code) into a complete, structured set of test cases, grounded in the
+classic ISTQB techniques rather than in "I'll click around and see" intuition.
+Every case must be reproducible (concrete steps + test data + an unambiguously
+verifiable expected result) and tied to the requirement it covers
+(traceability). The set must cover positive, negative, and boundary scenarios,
+not just the happy path.
 
-Дисциплина: **покрытие важнее объёма**. Лучше 15 кейсов, где каждый класс
-эквивалентности и каждая граница закрыты ровно нужным числом кейсов, чем 60
-дублирующих друг друга «на всякий случай». Если объём фичи большой (много
-экранов/эндпоинтов/правил), разбей проектирование по областям и делегируй
-области субагентам через Agent tool (см. «Запуск» ниже).
+Discipline: **coverage matters more than volume**. Fifteen cases where every
+equivalence class and every boundary is closed by exactly the right number of
+cases beat sixty overlapping "just in case" ones. If the feature is large (many
+screens/endpoints/rules), split the design by area and delegate the areas to
+subagents via the Agent tool (see "Running" below).
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (как определить периметр)
+## INPUT / SCOPE (how to determine the perimeter)
 
-Периметр: `$ARGUMENTS` (или контекст диалога). Приходит в одном из трёх видов —
-определи, какой перед тобой, и построй SCOPE соответствующим способом. Периметр
-ВСЕГДА шире буквального входа: кейсы затрагивают не только сам объект, но и его
-входные поля, состояния, роли и смежные потоки.
+Scope: `$ARGUMENTS` (or the conversation context). It arrives in one of three
+forms — determine which one you have, and build the SCOPE accordingly. The
+perimeter is ALWAYS broader than the literal input: cases touch not only the
+object itself, but its input fields, states, roles, and adjacent flows.
 
-**A. КОД: директория / сервис / фича / ветка / diff.**
-- Периметр = содержимое директории (или файлы из `git diff --stat` относительно
-  базовой ветки) + точки входа, которые фича обслуживает: HTTP-хендлеры и их
-  схемы валидации, формы/экраны UI, параметры запроса, модели данных.
-- Восстанови из кода фактические правила: типы и ограничения полей (min/max,
-  regex, обязательность), ветвления по ролям/статусам, переходы состояний,
-  комбинации флагов. Именно они станут входами для техник ниже.
+**A. CODE: directory / service / feature / branch / diff.**
+- Perimeter = the contents of the directory (or the files from `git diff --stat`
+  against the base branch) + the entry points the feature serves: HTTP handlers
+  and their validation schemas, UI forms/screens, query parameters, data models.
+- Reconstruct the actual rules from the code: field types and constraints
+  (min/max, regex, required-ness), role/status branching, state transitions,
+  flag combinations. These become the inputs for the techniques below.
 
-**B. ДОКУМЕНТ: требования / ТЗ / PRD / спецификация (.md/.txt/.docx).**
-- Прочитай целиком. Извлеки атомарные требования и пронумеруй их (REQ-1, REQ-2,
-  …) — даже если в документе нумерации нет; это база для трассируемости.
-- Из каждого требования вытащи: сущности, поля и их ограничения, роли/права,
-  бизнес-правила («если …, то …»), статусы и переходы, внешние интеграции.
-- Если есть доступ к коду — сверь «что должно быть» с «что реализовано»
-  (`grep`), и вынеси расхождения в раздел «непокрытые/сомнительные требования».
+**B. DOCUMENT: requirements / spec / PRD / specification (.md/.txt/.docx).**
+- Read it in full. Extract atomic requirements and number them (REQ-1, REQ-2,
+  …) — even if the document has no numbering; this is the basis for traceability.
+- From each requirement pull out: entities, fields and their constraints,
+  roles/permissions, business rules ("if …, then …"), statuses and transitions,
+  external integrations.
+- If you have access to the code — reconcile "what should be" against "what is
+  implemented" (`grep`), and put any discrepancies in the "uncovered/doubtful
+  requirements" section.
 
-**C. ISSUE в трекере (Jira/YouTrack/GitHub/Linear: ID или ссылка).**
-- Получи текст issue (заголовок, описание, acceptance criteria, комментарии)
-  через доступный механизм интеграции (MCP-инструмент трекера, если подключён).
-  Нет программного доступа — запроси текст у пользователя, не додумывай.
-- Найди связанные коммиты по ID тикета (`git log --all --grep=<ID> --oneline`,
-  затем `git show --stat <hash>`), чтобы понять фактический объём изменений.
-- Acceptance criteria из тикета — прямые кандидаты в требования для
-  трассируемости; каждое AC должно быть покрыто хотя бы одним кейсом.
+**C. ISSUE in a tracker (Jira/YouTrack/GitHub/Linear: ID or link).**
+- Retrieve the issue text (title, description, acceptance criteria, comments)
+  through an available integration mechanism (the tracker's MCP tool, if
+  connected). No programmatic access — ask the user for the text; do not invent it.
+- Find related commits by the ticket ID (`git log --all --grep=<ID> --oneline`,
+  then `git show --stat <hash>`) to understand the actual scope of changes.
+- The ticket's acceptance criteria are direct candidates for traceability
+  requirements; every AC must be covered by at least one case.
 
-Если периметр не определяется однозначно — остановись и уточни у пользователя,
-не проектируй наугад «тесты на весь сервис». Зафиксируй итоговый SCOPE (список
-требований/файлов/экранов) в начале артефакта.
+If the perimeter cannot be determined unambiguously — stop and check with the
+user; do not design "tests for the whole service" at random. Record the final
+SCOPE (the list of requirements/files/screens) at the top of the artifact.
 
-## КЛЮЧЕВОЙ ПРИНЦИП: НЕГАТИВ И ГРАНИЦЫ — НЕ ОПЦИЯ
+## KEY PRINCIPLE: NEGATIVE AND BOUNDARY CASES ARE NOT OPTIONAL
 
-Типичная ошибка тест-дизайна — спроектировать только «как система работает,
-когда всё хорошо». Реальные дефекты живут на границах и в невалидных входах.
-Поэтому:
+The typical test-design mistake is to design only "how the system works when
+everything is fine". Real defects live at the boundaries and in invalid inputs.
+Therefore:
 
-1. На каждый **валидный** класс эквивалентности — минимум один позитивный кейс.
-2. На каждый **невалидный** класс — минимум один негативный кейс (и проверяй
-   именно сообщение/код ошибки, а не только «не сохранилось»).
-3. На каждую числовую/строковую **границу** — кейсы с обеих сторон (min-1, min,
-   max, max+1; для длины строки — 0, 1, max, max+1).
-4. Для каждого бизнес-правила проверяй ветку «иначе» (что если условие не
-   выполнено) — незаданное поведение по умолчанию часто и есть дефект.
-5. Не считай требование покрытым, пока для него нет кейса в матрице
-   трассируемости. Незакрытое требование — это находка, а не «и так понятно».
+1. For each **valid** equivalence class — at least one positive case.
+2. For each **invalid** class — at least one negative case (and verify the
+   actual error message/code, not merely "it didn't save").
+3. For each numeric/string **boundary** — cases on both sides (min-1, min,
+   max, max+1; for string length — 0, 1, max, max+1).
+4. For each business rule, check the "else" branch (what if the condition is
+   not met) — undefined default behavior is often the defect itself.
+5. Do not consider a requirement covered until it has a case in the
+   traceability matrix. An unclosed requirement is a finding, not an
+   "it's obvious anyway".
 
-## ТЕХНИКИ ТЕСТ-ДИЗАЙНА (ядро скилла — применяй релевантные периметру)
+## TEST-DESIGN TECHNIQUES (the core of the skill — apply those relevant to the scope)
 
-Для каждой техники: КОГДА применять, КАК применять, мини-пример. Обычно
-комбинируются несколько техник на одну фичу.
+For each technique: WHEN to apply it, HOW to apply it, a mini-example. Usually
+several techniques are combined on a single feature.
 
-### 1. Эквивалентное разбиение (equivalence partitioning)
-**Когда:** у входа есть диапазоны/наборы значений, обрабатываемые одинаково.
-**Как:** раздели область значений каждого входа на классы — валидные и
-невалидные, — где все значения класса система обрабатывает единообразно; возьми
-по одному представителю на класс (один кейс на класс, не по 10 значений из
-одного класса).
-**Пример** (поле «возраст», допустимо 18–65):
-- Валидный класс: 18–65 → представитель 30.
-- Невалидный «меньше»: <18 → представитель 10.
-- Невалидный «больше»: >65 → представитель 80.
-- Невалидный «не число»: `abc`, пусто.
-→ 4 кейса вместо перебора всех чисел.
+### 1. Equivalence partitioning
+**When:** an input has ranges/sets of values that are processed identically.
+**How:** divide each input's value space into classes — valid and invalid —
+where the system handles all values in a class uniformly; take one
+representative per class (one case per class, not 10 values from the same class).
+**Example** (field "age", allowed 18–65):
+- Valid class: 18–65 → representative 30.
+- Invalid "too low": <18 → representative 10.
+- Invalid "too high": >65 → representative 80.
+- Invalid "not a number": `abc`, empty.
+→ 4 cases instead of enumerating all numbers.
 
-### 2. Анализ граничных значений (boundary value analysis)
-**Когда:** класс эквивалентности имеет упорядоченную границу (числа, длины,
-даты, количество). Дефекты концентрируются на краях (`>` vs `>=`, off-by-one).
-**Как:** для каждой границы возьми min-1 / min / min+1 и max-1 / max / max+1
-(двух- или трёхточечный анализ). Для строк — длина 0, 1, max, max+1.
-**Пример** (возраст 18–65): кейсы для 17, 18, 19 и 64, 65, 66. Отдельно проверь
-поведение при точном значении границы (18 — разрешено или нет).
+### 2. Boundary value analysis
+**When:** an equivalence class has an ordered boundary (numbers, lengths,
+dates, counts). Defects concentrate at the edges (`>` vs `>=`, off-by-one).
+**How:** for each boundary take min-1 / min / min+1 and max-1 / max / max+1
+(two- or three-point analysis). For strings — length 0, 1, max, max+1.
+**Example** (age 18–65): cases for 17, 18, 19 and 64, 65, 66. Separately check
+the behavior at the exact boundary value (is 18 allowed or not).
 
-### 3. Таблицы решений (decision tables)
-**Когда:** результат зависит от **комбинации** нескольких условий (флаги, роли,
-статусы), а не от одного входа.
-**Как:** выпиши условия (строки) и все их комбинации (столбцы-правила), для
-каждой комбинации — ожидаемое действие; сверни невозможные/эквивалентные
-комбинации. Каждое реализуемое правило → минимум один кейс.
-**Пример** (доступ к скидке): условия «Пользователь = VIP?» и «Сумма > 10000?».
+### 3. Decision tables
+**When:** the result depends on a **combination** of several conditions (flags,
+roles, statuses) rather than a single input.
+**How:** write out the conditions (rows) and all their combinations
+(rule columns), and for each combination the expected action; collapse
+impossible/equivalent combinations. Every implementable rule → at least one case.
+**Example** (discount access): conditions "User = VIP?" and "Amount > 10000?".
 
-| Правило | VIP | Сумма>10000 | Скидка |
+| Rule | VIP | Amount>10000 | Discount |
 |---|---|---|---|
-| R1 | да | да | 15% |
-| R2 | да | нет | 10% |
-| R3 | нет | да | 5% |
-| R4 | нет | нет | 0% |
+| R1 | yes | yes | 15% |
+| R2 | yes | no | 10% |
+| R3 | no | yes | 5% |
+| R4 | no | no | 0% |
 
-→ 4 кейса, по одному на правило (при N бинарных условиях — до 2^N правил, лишние
-отсекай логикой).
+→ 4 cases, one per rule (with N binary conditions — up to 2^N rules; prune the
+redundant ones with logic).
 
-### 4. Тестирование переходов состояний (state transition)
-**Когда:** у сущности есть жизненный цикл со статусами (заказ: `новый →
-оплачен → отправлен → доставлен`; отмена возможна не из любого статуса).
-**Как:** построй граф состояний. Покрой: (а) все **валидные** переходы; (б)
-ключевые **невалидные** переходы (система должна их отклонять — напр. «доставить
-неоплаченный»); (в) недостижимые/тупиковые состояния. 0-switch покрытие — каждый
-переход хотя бы раз; при рисках — 1-switch (пары переходов).
-**Пример:** валидный кейс `оплачен → отправлен` (ожидаем успех); негативный кейс
-`новый → доставлен` (ожидаем отказ, статус не меняется).
+### 4. State transition testing
+**When:** an entity has a lifecycle with statuses (order: `new →
+paid → shipped → delivered`; cancellation is not possible from every status).
+**How:** build a state graph. Cover: (a) all **valid** transitions; (b) the
+key **invalid** transitions (the system must reject them — e.g. "deliver an
+unpaid order"); (c) unreachable/dead-end states. 0-switch coverage — each
+transition at least once; where there is risk — 1-switch (pairs of transitions).
+**Example:** valid case `paid → shipped` (expect success); negative case
+`new → delivered` (expect rejection, status does not change).
 
-### 5. Попарное тестирование (pairwise / all-pairs)
-**Когда:** много независимых параметров с несколькими значениями каждый —
-полный перебор комбинаций взрывается (напр. 4 параметра × 3 значения = 81).
-**Как:** сгенерируй набор, покрывающий все **пары** значений параметров (обычно
-достаточно ~10–15 кейсов вместо 81), т.к. большинство дефектов провоцируется
-взаимодействием двух факторов. Инструменты: PICT, allpairspy, онлайн-генераторы.
-**Пример** (браузер × ОС × способ оплаты × валюта) — вместо всех комбинаций
-берём минимальный набор, где каждая пара «браузер+ОС», «ОС+оплата» и т.д.
-встречается хотя бы раз.
+### 5. Pairwise testing (all-pairs)
+**When:** there are many independent parameters, each with several values —
+the full combination enumeration explodes (e.g. 4 parameters × 3 values = 81).
+**How:** generate a set that covers all **pairs** of parameter values (usually
+~10–15 cases suffice instead of 81), since most defects are triggered by the
+interaction of two factors. Tools: PICT, allpairspy, online generators.
+**Example** (browser × OS × payment method × currency) — instead of all
+combinations, take a minimal set where each pair "browser+OS", "OS+payment",
+etc. occurs at least once.
 
-### 6. Сценарное / use-case тестирование
-**Когда:** фича — это сквозной пользовательский поток (регистрация, оформление
-заказа, онбординг).
-**Как:** для каждого use case распиши **основной поток** (happy path) +
-**альтернативные потоки** (валидные ответвления) + **исключительные потоки**
-(ошибки, отмены, таймауты). Каждый поток → отдельный кейс.
-**Пример** (оформление заказа): основной — товар в корзину → адрес → оплата →
-подтверждение; альтернативный — применён промокод; исключительный — оплата
-отклонена банком, отмена на шаге адреса, товар закончился во время оформления.
+### 6. Scenario / use-case testing
+**When:** the feature is an end-to-end user flow (registration, order
+checkout, onboarding).
+**How:** for each use case write out the **main flow** (happy path) +
+**alternative flows** (valid branches) + **exceptional flows** (errors,
+cancellations, timeouts). Each flow → a separate case.
+**Example** (order checkout): main — item to cart → address → payment →
+confirmation; alternative — a promo code is applied; exceptional — payment
+declined by the bank, cancellation at the address step, item went out of stock
+during checkout.
 
-### 7. Предугадывание ошибок (error guessing)
-**Когда:** дополняет формальные техники опытом «где обычно ломается». Применяй
-всегда как финальный проход.
-**Как:** прогони вход через типовые ловушки:
-- пустое значение, пробелы, только пробелы;
-- `null` / отсутствие поля в запросе;
-- спецсимволы, кавычки, `<script>`, SQL-мета (`' OR 1=1`);
-- очень длинная строка (10k+ символов), очень большое/отрицательное число, ноль;
-- дубликаты (повторная отправка, двойной клик, уникальность);
-- конкурентность (два запроса одновременно, гонка);
-- unicode / emoji / RTL / диакритика в текстовых полях;
-- часовые пояса, переход через полночь, 29 февраля, DST;
-- разные локали (десятичный разделитель `,` vs `.`, формат даты, телефон);
-- лимиты (пагинация на границе, пустой список, один элемент, максимум).
+### 7. Error guessing
+**When:** it complements the formal techniques with experience of "where it
+usually breaks". Always apply it as a final pass.
+**How:** run the input through the typical traps:
+- empty value, spaces, whitespace-only;
+- `null` / missing field in the request;
+- special characters, quotes, `<script>`, SQL meta (`' OR 1=1`);
+- a very long string (10k+ characters), a very large/negative number, zero;
+- duplicates (resubmission, double click, uniqueness);
+- concurrency (two requests at once, a race);
+- unicode / emoji / RTL / diacritics in text fields;
+- time zones, crossing midnight, February 29, DST;
+- different locales (decimal separator `,` vs `.`, date format, phone);
+- limits (pagination at the boundary, empty list, one element, maximum).
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ
+## EDGE CASES THAT ARE OFTEN MISSED
 
-- Пустой набор данных / первый запуск (empty state) и ровно один элемент.
-- Поведение при отсутствии прав: тот же кейс под ролью без доступа.
-- Идемпотентность: повторная отправка той же формы/запроса.
-- Отмена операции на середине и возврат назад (back) в браузере посреди флоу.
-- Обновление страницы (F5) в середине многошагового флоу — теряются ли данные.
-- Двойной клик по кнопке отправки — не создаётся ли дубль.
-- Максимальная длина, обрезается ли ввод молча или выдаёт ошибку.
-- Ведущие/хвостовые пробелы: `" admin "` — триммится или считается новым.
-- Числа: 0, отрицательное, дробное там, где ждут целое, разделитель тысяч.
-- Валюта/деньги: округление, копейки, отрицательная сумма, переполнение.
-- Дата в прошлом/будущем, конец месяца, високосный год, разные таймзоны.
-- Регистр: `Email@x.com` vs `email@x.com` при уникальности/логине.
-- Сетевые сбои: таймаут, 500 от бэкенда, потеря соединения на шаге оплаты.
-- Кэш/устаревшие данные: объект удалён в другой вкладке, а тут ещё открыт.
+- Empty data set / first run (empty state) and exactly one element.
+- Behavior with no permissions: the same case under a role without access.
+- Idempotency: resubmitting the same form/request.
+- Cancelling an operation mid-way and going back (browser Back) mid-flow.
+- Reloading the page (F5) in the middle of a multi-step flow — is data lost.
+- Double-clicking the submit button — does a duplicate get created.
+- Maximum length — is input silently truncated or does it error.
+- Leading/trailing whitespace: `" admin "` — is it trimmed or treated as new.
+- Numbers: 0, negative, fractional where an integer is expected, thousands separator.
+- Currency/money: rounding, cents, negative amount, overflow.
+- Date in the past/future, end of month, leap year, different time zones.
+- Case: `Email@x.com` vs `email@x.com` for uniqueness/login.
+- Network failures: timeout, 500 from the backend, connection loss at the payment step.
+- Cache/stale data: the object is deleted in another tab while still open here.
 
-## ПРИОРИТИЗАЦИЯ КЕЙСОВ (risk-based)
+## CASE PRIORITIZATION (risk-based)
 
-Каждому кейсу — приоритет по риску (вероятность × влияние):
-- **P0 (критический):** happy path основной бизнес-ценности, безопасность,
-  потеря/порча данных, деньги. Падение блокирует релиз. Прогоняется всегда.
-- **P1 (высокий):** основные негативные и граничные кейсы, важные
-  альтернативные потоки, валидация ключевых полей.
-- **P2 (средний/низкий):** редкие комбинации, косметика, второстепенные локали,
-  экзотические edge cases. Прогоняются по времени/при регрессе.
+Assign each case a priority by risk (likelihood × impact):
+- **P0 (critical):** the happy path of the core business value, security,
+  data loss/corruption, money. A failure blocks the release. Always run.
+- **P1 (high):** the main negative and boundary cases, important
+  alternative flows, validation of the key fields.
+- **P2 (medium/low):** rare combinations, cosmetics, secondary locales,
+  exotic edge cases. Run as time allows / during regression.
 
-## ФОРМАТ ТЕСТ-КЕЙСА
+## TEST CASE FORMAT
 
-Каждый кейс содержит:
-- **ID** — стабильный (`TC-<feature-slug>-001`).
-- **Заголовок** — суть одной фразой.
-- **Приоритет** — P0/P1/P2.
-- **Тип** — positive / negative / boundary.
-- **Требование** — ID покрываемого требования (трассируемость).
-- **Предусловия** — состояние системы/данных до начала.
-- **Тестовые данные** — конкретные значения входов.
-- **Шаги** — пронумерованные, воспроизводимые действия.
-- **Ожидаемый результат** — однозначно проверяемый (код ответа, сообщение,
-  состояние в БД/UI), не «должно работать».
+Each case contains:
+- **ID** — stable (`TC-<feature-slug>-001`).
+- **Title** — the essence in one phrase.
+- **Priority** — P0/P1/P2.
+- **Type** — positive / negative / boundary.
+- **Requirement** — the ID of the covered requirement (traceability).
+- **Preconditions** — the state of the system/data before starting.
+- **Test data** — concrete input values.
+- **Steps** — numbered, reproducible actions.
+- **Expected result** — unambiguously verifiable (response code, message,
+  state in the DB/UI), not "it should work".
 
-### Примеры
+### Examples
 
-**TC-age-form-003** · P1 · boundary · покрывает REQ-2 (возраст 18–65)
-- Предусловия: открыта форма регистрации, остальные поля валидны.
-- Тестовые данные: возраст = `17`.
-- Шаги:
-  1. Ввести возраст `17`.
-  2. Заполнить остальные обязательные поля валидными значениями.
-  3. Нажать «Зарегистрироваться».
-- Ожидаемый результат: форма не отправляется, под полем «Возраст» показана
-  ошибка «Возраст должен быть от 18 до 65», запрос на бэкенд не уходит.
+**TC-age-form-003** · P1 · boundary · covers REQ-2 (age 18–65)
+- Preconditions: the registration form is open, the other fields are valid.
+- Test data: age = `17`.
+- Steps:
+  1. Enter age `17`.
+  2. Fill the other required fields with valid values.
+  3. Click "Register".
+- Expected result: the form is not submitted, the error "Age must be between 18
+  and 65" is shown under the "Age" field, no request is sent to the backend.
 
-**TC-order-status-007** · P1 · negative · покрывает REQ-9 (переходы статуса)
-- Предусловия: существует заказ в статусе `новый` (не оплачен).
-- Тестовые данные: order_id существующего неоплаченного заказа.
-- Шаги:
-  1. Отправить `POST /orders/{id}/deliver`.
-- Ожидаемый результат: HTTP 409, тело `{"error":"invalid_transition"}`, статус
-  заказа в БД остаётся `новый`.
+**TC-order-status-007** · P1 · negative · covers REQ-9 (status transitions)
+- Preconditions: an order exists in status `new` (not paid).
+- Test data: the order_id of an existing unpaid order.
+- Steps:
+  1. Send `POST /orders/{id}/deliver`.
+- Expected result: HTTP 409, body `{"error":"invalid_transition"}`, the order's
+  status in the DB stays `new`.
 
-**TC-discount-002** · P0 · positive · покрывает REQ-5 (правило R1 таблицы)
-- Предусловия: пользователь с признаком VIP, корзина на сумму 12000.
-- Шаги: 1. Перейти к оформлению. 2. Проверить итоговую скидку.
-- Ожидаемый результат: применена скидка 15%, итог 10200.
+**TC-discount-002** · P0 · positive · covers REQ-5 (table rule R1)
+- Preconditions: a user flagged VIP, a cart totaling 12000.
+- Steps: 1. Proceed to checkout. 2. Check the final discount.
+- Expected result: a 15% discount is applied, total 10200.
 
-## ФОРМАТ АРТЕФАКТА
+## ARTIFACT FORMAT
 
-Сохрани результат в `docs/qa/test-cases/<feature-slug>.md` (сначала проверь
-структуру репозитория и следуй ей; `docs/qa/...` — дефолт). Структура файла:
+Save the result to `docs/qa/test-cases/<feature-slug>.md` (first check the
+repository structure and follow it; `docs/qa/...` is the default). File
+structure:
 
-1. **SCOPE** — что покрывается (фича/файлы/экраны), источник требований, дата.
-2. **Список требований** — REQ-1…REQ-N (извлечённые/пронумерованные).
-3. **Тест-кейсы** — таблицей или структурированным списком в формате выше,
-   сгруппированные по функциональным областям.
-4. **Матрица трассируемости** — таблица требование → покрывающие его кейсы;
-   визуально видно, что каждое требование закрыто.
+1. **SCOPE** — what is covered (feature/files/screens), the requirements source, date.
+2. **Requirements list** — REQ-1…REQ-N (extracted/numbered).
+3. **Test cases** — as a table or a structured list in the format above,
+   grouped by functional area.
+4. **Traceability matrix** — a table of requirement → the cases that cover it;
+   it visually shows that every requirement is closed.
 
-| Требование | Кейсы | Покрыто |
+| Requirement | Cases | Covered |
 |---|---|---|
-| REQ-1 | TC-…-001, TC-…-002 | да |
-| REQ-2 | TC-…-003, TC-…-004, TC-…-005 | да |
-| REQ-7 | — | НЕТ (см. раздел 5) |
+| REQ-1 | TC-…-001, TC-…-002 | yes |
+| REQ-2 | TC-…-003, TC-…-004, TC-…-005 | yes |
+| REQ-7 | — | NO (see section 5) |
 
-5. **Непокрытые / сомнительные требования** — требования без кейсов и почему
-   (недостаточно данных, противоречие в ТЗ, не реализовано в коде, требует
-   уточнения). Это часть результата, а не недоработка — явный список того, что
-   нужно прояснить с автором.
-6. **Сводка** — сколько кейсов, распределение по P0/P1/P2 и типам, какие
-   техники применены к каким областям.
+5. **Uncovered / doubtful requirements** — requirements without cases and why
+   (insufficient data, a contradiction in the spec, not implemented in the code,
+   needs clarification). This is part of the result, not a shortfall — an
+   explicit list of what needs clarifying with the author.
+6. **Summary** — how many cases, the P0/P1/P2 and type distribution, which
+   techniques were applied to which areas.
 
-## ЗАПУСК (практическая инструкция)
+## RUNNING (practical instructions)
 
-1. САМ (в основном потоке) выполни раздел SCOPE — определи тип входа, извлеки и
-   пронумеруй требования, зафиксируй периметр. Не делегируй: субагент не видит
-   контекст диалога и не знает, что понимается под «фичей».
-2. Классифицируй каждое требование/вход и подбери технику(и): диапазон →
-   partitioning + BVA; комбинация условий → decision table; жизненный цикл →
-   state transition; много параметров → pairwise; сквозной флоу → use-case.
-   Финальным проходом добавь error guessing.
-3. Для каждого требования спроектируй позитивные, негативные и граничные кейсы;
-   присвой ID, приоритет, тип, ссылку на требование.
-4. Если фича большая (много экранов/эндпоинтов) и доступен Agent tool — раздели
-   на независимые области и запусти субагента на область. Каждому передай:
-   конкретные требования/файлы области, формат кейса, техники, шкалу приоритетов
-   (субагент не видит этот файл). Собери кейсы в единый артефакт, устрани
-   дубликаты, сохрани сквозную нумерацию ID.
-5. Построй матрицу трассируемости; всё непокрытое вынеси в отдельный раздел.
-6. Сохрани артефакт в `docs/qa/test-cases/<feature-slug>.md`. Если файл по этой
-   фиче уже есть — продолжи нумерацию ID и обнови кейсы, а не пересоздавай.
+1. YOURSELF (in the main thread) do the SCOPE section — determine the input
+   type, extract and number the requirements, record the perimeter. Do not
+   delegate: a subagent does not see the conversation context and does not know
+   what is meant by "the feature".
+2. Classify each requirement/input and pick the technique(s): range →
+   partitioning + BVA; a combination of conditions → decision table; a lifecycle →
+   state transition; many parameters → pairwise; an end-to-end flow → use-case.
+   As a final pass add error guessing.
+3. For each requirement design positive, negative, and boundary cases; assign
+   the ID, priority, type, and link to the requirement.
+4. If the feature is large (many screens/endpoints) and the Agent tool is
+   available — split it into independent areas and launch a subagent per area.
+   Give each: the specific requirements/files of the area, the case format, the
+   techniques, the priority scale (the subagent does not see this file). Collect
+   the cases into a single artifact, remove duplicates, keep a continuous ID
+   numbering.
+5. Build the traceability matrix; move everything uncovered into a separate section.
+6. Save the artifact to `docs/qa/test-cases/<feature-slug>.md`. If a file for
+   this feature already exists — continue the ID numbering and update the cases,
+   do not recreate it.
 
-Это проектирование тестов, а не их автоматизация: артефакт — набор кейсов для
-ручного или последующего автоматизированного прогона. Код проекта не изменяется.
+This is test design, not test automation: the artifact is a set of cases for
+manual or subsequent automated execution. Project code is not changed.
+

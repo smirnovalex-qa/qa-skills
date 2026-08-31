@@ -1,170 +1,176 @@
 ---
 name: feature-review
-description: Полное ревью новой фичи или ветки перед мержем/релизом — сверка с требованиями (YouTrack/файл требований, если есть; иначе агент сам восстановит объём изменений по git diff), code review, поиск нестыковок в use cases, проверка регрессии смежных модулей и живое тестирование UI в браузере, с итоговым prod-ready вердиктом. Используй всегда, когда просят проверить готовность фичи/ветки/PR к мержу или релизу, ревьюнуть/протестировать новую функциональность, пройти use cases вживую, проверить регрессию соседних экранов, или сделать QA/приёмку перед продом — даже если явной ссылки на требования/issue в запросе нет.
-argument-hint: "[ссылка на YouTrack issue] [путь к requirements.md] [ветка/диапазон] — все поля опциональны, агент сам найдёт недостающее"
+description: Full review of a new feature or branch before merge/release — verification against requirements (YouTrack/a requirements file, if any; otherwise the agent reconstructs the scope of changes from the git diff itself), code review, hunting for inconsistencies in use cases, checking adjacent modules for regression, and live UI testing in the browser, with a final prod-ready verdict. Use whenever asked to check a feature/branch/PR for readiness to merge or release, review/test new functionality, walk through use cases live, check adjacent screens for regression, or do QA/acceptance before prod — even if there is no explicit reference to requirements/an issue in the request.
+argument-hint: "[link to a YouTrack issue] [path to requirements.md] [branch/range] — all fields optional, the agent finds what is missing itself"
 disallowed-tools: Edit, Write
 ---
 
-# Ревью и тестирование новой фичи (code review + логика + use cases + регрессия)
+# Review and testing of a new feature (code review + logic + use cases + regression)
 
-## ВВОДНЫЕ
+## INPUTS
 
-Разбери `$ARGUMENTS` и контекст диалога, чтобы извлечь то, что дано; всё,
-что не дано явно, определи сам по коду и требованиям — не жди, пока
-пользователь перечислит это за тебя:
+Parse `$ARGUMENTS` and the dialog context to extract what is given;
+everything not given explicitly, determine yourself from the code and
+requirements — do not wait for the user to list it out for you:
 
-- **Требования (YouTrack issue)** — ссылка вида `https://youtrack.example.com/issue/...`,
-  если есть в аргументах или в диалоге.
-- **Требования (файл в репозитории)** — путь вида `docs/qa/requirements/**/requirements.md`,
-  если есть.
-- **Ветка / диапазон коммитов для ревью** — если не указано, бери текущую
-  ветку относительно `main`/`dev`.
-- **Затронутый функционал / модуль(и)** — опциональная подсказка; не
-  ограничивайся ею, найди все реально затронутые модули сам (шаг 2).
-- **Смежные интеграции, которые нельзя ломать** — опциональная подсказка;
-  дополни собственным анализом зависимостей.
-- **URL/команда для локального запуска UI** — если не указано, определи
-  сам по README/package.json/docker-compose соответствующего сервиса.
+- **Requirements (YouTrack issue)** — a link of the form
+  `https://youtrack.example.com/issue/...`, if present in the arguments or
+  in the dialog.
+- **Requirements (file in the repository)** — a path of the form
+  `docs/qa/requirements/**/requirements.md`, if present.
+- **Branch / commit range to review** — if not specified, take the current
+  branch relative to `main`/`dev`.
+- **Affected functionality / module(s)** — an optional hint; do not limit
+  yourself to it, find all actually affected modules yourself (step 2).
+- **Adjacent integrations that must not break** — an optional hint;
+  supplement it with your own dependency analysis.
+- **URL/command to run the UI locally** — if not specified, determine it
+  yourself from the README/package.json/docker-compose of the relevant
+  service.
 
-Если из всех вводных не дано вообще ничего (ни ссылки на issue, ни файла
-требований, ни ветки) — прежде чем начинать полноценное ревью, кратко
-уточни у пользователя хотя бы один источник требований; без источника
-требований пункт 3 (сверка "требование → реализация") невозможен.
+If none of the inputs are given at all (no issue link, no requirements
+file, no branch) — before starting a full review, briefly ask the user for
+at least one source of requirements; without a source of requirements,
+step 3 (matching "requirement → implementation") is impossible.
 
-## ЗАДАЧА
+## TASK
 
-В репозитории были изменения — разработчик попытался реализовать новую(ые)
-фичу(и). Список затронутого функционала/модулей/сервисов/смежных
-интеграций в вводных может быть неполным или отсутствовать вовсе — не
-полагайся только на него, самостоятельно найди ВСЕ фактически затронутые
-модули, сервисы и функции по факту изменений в коде (см. шаг 2) и
-дополни/скорректируй то, что указано в подсказке.
+There were changes in the repository — the developer attempted to
+implement one or more new features. The list of affected
+functionality/modules/services/adjacent integrations in the inputs may be
+incomplete or absent entirely — do not rely on it alone; independently
+find ALL actually affected modules, services, and functions based on the
+actual changes in the code (see step 2) and supplement/correct what is
+specified in the hint.
 
-1. **Изучи требования**: открой и прочитай issue по ссылке и (если указан)
-   файл requirements.md. Зафиксируй список функциональных и
-   нефункциональных требований, acceptance criteria и явных
-   ограничений/edge cases, упомянутых в задаче.
+1. **Study the requirements**: open and read the issue at the link and (if
+   specified) the requirements.md file. Record the list of functional and
+   non-functional requirements, acceptance criteria, and explicit
+   constraints/edge cases mentioned in the task.
 
-2. **Самостоятельно найди все затронутые модули/сервисы/функции** — не
-   жди, пока их перечислит пользователь:
-   - Посмотри git log/diff по указанной ветке относительно базовой ветки
-     (main/dev) и составь полный список изменённых файлов.
-   - Для каждого изменённого файла определи, к какому сервису/модулю/
-     пакету он относится (в монорепе — конкретный сервис в services/*,
-     конкретный фронтенд/пакет и т.д.).
-   - Пройди "на один уровень вглубь": какие функции/классы/эндпоинты/
-     обработчики событий реально изменены или добавлены (не только имена
-     файлов) — построй список конкретных точек входа (API-эндпоинты,
-     обработчики webhook, консьюмеры очередей, cron-джобы,
-     UI-компоненты/страницы).
-   - Найди вызывающий и потребляющий код: кто вызывает изменённые функции/
-     эндпоинты и кто зависит от изменённых контрактов данных (grep по
-     использованию, поиск импортов/ссылок) — это и есть кандидаты на
-     регрессию, даже если они не были явно упомянуты в требованиях.
-   - Зафиксируй итоговый список затронутых модулей/сервисов/функций — он
-     используется во всех последующих шагах вместо/в дополнение к
-     подсказке из "ВВОДНЫЕ".
+2. **Independently find all affected modules/services/functions** — do not
+   wait for the user to list them:
+   - Look at the git log/diff for the specified branch relative to the base
+     branch (main/dev) and compile a complete list of changed files.
+   - For each changed file, determine which service/module/package it
+     belongs to (in a monorepo — the specific service in services/*, the
+     specific frontend/package, etc.).
+   - Go "one level deeper": which functions/classes/endpoints/event
+     handlers are actually changed or added (not just file names) — build a
+     list of specific entry points (API endpoints, webhook handlers, queue
+     consumers, cron jobs, UI components/pages).
+   - Find the calling and consuming code: who calls the changed
+     functions/endpoints and who depends on the changed data contracts
+     (grep for usage, search for imports/references) — these are the
+     candidates for regression, even if they were not explicitly mentioned
+     in the requirements.
+   - Record the resulting list of affected modules/services/functions — it
+     is used in all subsequent steps instead of/in addition to the hint
+     from "INPUTS".
 
-3. **Сопоставь требования и реализацию**:
-   - Каждое требование из issue/requirements.md — реализовано полностью,
-     частично или не реализовано? Укажи конкретно, каких пунктов не
-     хватает.
-   - Есть ли расхождения между документацией/требованиями и фактическим
-     поведением кода?
-   - Есть ли скрытые допущения разработчика, которые не были явно
-     оговорены в требованиях?
+3. **Match requirements against the implementation**:
+   - Is each requirement from the issue/requirements.md implemented fully,
+     partially, or not at all? State specifically which points are missing.
+   - Are there discrepancies between the documentation/requirements and the
+     actual behavior of the code?
+   - Are there hidden developer assumptions that were not explicitly stated
+     in the requirements?
 
-4. **Проведи code review изменений** (по полному списку модулей/файлов из
-   шага 2, а не только по тем, что упомянуты в подсказке):
-   - Корректность логики (граничные условия, обработка ошибок, race
-     conditions, идемпотентность, повторные попытки/ретраи,
-     транзакционность там, где это применимо).
-   - Валидация входных данных и защита от некорректных/вредоносных данных
-     (в т.ч. типовые уязвимости OWASP: инъекции, XSS, небезопасная
-     десериализация и т.п., если применимо).
-   - Логирование и наблюдаемость: достаточно ли логов для диагностики в
-     проде, нет ли утечки чувствительных данных в логи.
-   - Конфигурация/секреты: не захардкожены ли значения, которые должны
-     быть конфигурируемыми (URL, токены, ключи, feature-флаги).
-   - Совместимость со стилем и архитектурой существующего кода в модуле/
-     сервисе.
-   - Наличие и адекватность тестов (unit/integration) на новую логику;
-     чего не хватает.
-   - Миграции БД (если есть) — обратимость, безопасность для продакшена,
-     отсутствие блокировок на больших таблицах.
+4. **Perform a code review of the changes** (over the full list of
+   modules/files from step 2, not just those mentioned in the hint):
+   - Correctness of the logic (boundary conditions, error handling, race
+     conditions, idempotency, retries, transactionality where applicable).
+   - Input validation and protection against incorrect/malicious data
+     (including typical OWASP vulnerabilities: injections, XSS, insecure
+     deserialization, etc., where applicable).
+   - Logging and observability: are the logs sufficient for diagnosis in
+     production, is there any leakage of sensitive data into the logs.
+   - Configuration/secrets: are values that should be configurable (URLs,
+     tokens, keys, feature flags) hardcoded.
+   - Compatibility with the style and architecture of the existing code in
+     the module/service.
+   - Presence and adequacy of tests (unit/integration) for the new logic;
+     what is missing.
+   - DB migrations (if any) — reversibility, safety for production, absence
+     of locks on large tables.
 
-5. **Проверь use cases на нелогичные моменты и несостыковки**:
-   - Пройди по всем сценариям использования (счастливый путь +
-     альтернативные ветки) и проверь, нет ли противоречий между шагами.
-   - Проверь граничные/крайние случаи: пустые значения, дубликаты,
-     конкурентные запросы, повторная обработка одного и того же события,
-     отсутствие сети/недоступность внешнего сервиса, некорректные форматы
-     данных, устаревшие/просроченные данные.
-   - Проверь мультиаккаунт/мультитенантность (если применимо к модулю) —
-     нет ли утечки данных между аккаунтами/пользователями/проектами.
-   - Проверь идемпотентность обработчиков webhook/событий (если
-     применимо) — не создаётся ли дублирующаяся сущность при повторном
-     получении события.
+5. **Check the use cases for illogical points and inconsistencies**:
+   - Walk through all usage scenarios (happy path + alternative branches)
+     and check for contradictions between steps.
+   - Check boundary/edge cases: empty values, duplicates, concurrent
+     requests, repeated processing of the same event, no network/external
+     service unavailable, incorrect data formats, stale/expired data.
+   - Check multi-account/multi-tenancy (if applicable to the module) — is
+     there any data leakage between accounts/users/projects.
+   - Check the idempotency of webhook/event handlers (if applicable) — is a
+     duplicate entity created when the event is received again.
 
-6. **Проверь регрессию** (по полному списку модулей/сервисов/интеграций из
-   шага 2, включая те, что явно не были упомянуты в вводных, но зависят от
-   изменённого кода):
-   - Не сломан ли существующий функционал затронутых модулей и смежные
-     интеграции.
-   - Проверь обратную совместимость API/контрактов данных, если они
-     менялись.
-   - Если есть автотесты — прогони их и зафиксируй результат; если тестов
-     нет — явно это укажи как риск.
+6. **Check for regression** (over the full list of
+   modules/services/integrations from step 2, including those not
+   explicitly mentioned in the inputs but which depend on the changed
+   code):
+   - Whether existing functionality of the affected modules and adjacent
+     integrations is broken.
+   - Check backward compatibility of APIs/data contracts, if they changed.
+   - If there are automated tests — run them and record the result; if
+     there are no tests — flag this explicitly as a risk.
 
-7. **Проверь UI**, если изменения затрагивают фронтенд/интерфейс (страницы,
-   компоненты, формы, виджеты, боты с UI-подобным сценарием — например
-   диалоги телеграм-бота):
-   - Подними приложение локально (используй URL/команду из вводных; если
-     не указано — определи команду запуска сам по README/package.json/
-     docker-compose соответствующего сервиса) и открой затронутые экраны
-     в браузере (или пройди сценарий бота вживую).
-   - Не ограничивайся статическим чтением кода компонентов — реально
-     пройди фичу руками: заполни формы, нажми кнопки, отправь сообщения
-     боту и т.д.
-   - Проверь golden path (основной сценарий из требований) и как минимум
-     2-3 граничных сценария (пустые/невалидные данные, повторный ввод,
-     отмена действия, потеря соединения).
-   - Проверь, что не появилось визуальных/поведенческих регрессий в
-     соседних экранах/шагах флоу, которые не менялись напрямую, но могли
-     быть задеты (общие компоненты, layout, состояние формы, роутинг).
-   - Проверь состояния загрузки/ошибок/пустых данных (loading/error/empty
-     states), если применимо.
-   - Если UI поднять не удалось (нет окружения, нет доступа, headless-
-     среда) — явно укажи это в отчёте как ограничение проверки, не выдавай
-     статическое чтение кода за подтверждённую проверку UI.
+7. **Check the UI**, if the changes affect the frontend/interface (pages,
+   components, forms, widgets, bots with a UI-like scenario — for example,
+   Telegram bot dialogs):
+   - Bring up the application locally (use the URL/command from the inputs;
+     if not specified — determine the launch command yourself from the
+     README/package.json/docker-compose of the relevant service) and open
+     the affected screens in the browser (or walk through the bot scenario
+     live).
+   - Do not limit yourself to a static reading of the component code —
+     actually go through the feature by hand: fill in forms, click buttons,
+     send messages to the bot, etc.
+   - Check the golden path (the main scenario from the requirements) and at
+     least 2-3 boundary scenarios (empty/invalid data, repeated input,
+     canceling an action, loss of connection).
+   - Check that no visual/behavioral regressions appeared in adjacent
+     screens/flow steps that were not changed directly but could have been
+     affected (shared components, layout, form state, routing).
+   - Check loading/error/empty states, if applicable.
+   - If the UI could not be brought up (no environment, no access, a
+     headless environment) — explicitly note this in the report as a
+     verification limitation; do not pass off a static reading of the code
+     as a confirmed UI check.
 
-8. **Оцени готовность к продакшену** (enterprise / best practice / prod-ready):
-   - Обработка ошибок и graceful degradation при сбое внешних сервисов.
-   - Производительность: нет ли N+1 запросов, лишних синхронных вызовов в
-     горячем пути.
-   - Безопасность: аутентификация/авторизация на новых эндпоинтах,
-     ограничение доступа.
-   - Мониторинг/алертинг: возможно ли отследить сбой этой фичи в проде.
-   - Документация: обновлена ли документация/README/требования под
-     фактическую реализацию.
+8. **Assess production readiness** (enterprise / best practice / prod-ready):
+   - Error handling and graceful degradation on failure of external
+     services.
+   - Performance: any N+1 queries, unnecessary synchronous calls on the hot
+     path.
+   - Security: authentication/authorization on new endpoints, access
+     restriction.
+   - Monitoring/alerting: is it possible to track a failure of this feature
+     in production.
+   - Documentation: is the documentation/README/requirements updated to
+     match the actual implementation.
 
-## РЕЗУЛЬТАТ (формат ответа)
+## RESULT (response format)
 
-1. Краткое резюме: готова ли фича к релизу (да / да с замечаниями / нет).
-2. Список фактически затронутых модулей/сервисов/функций/точек входа,
-   найденный самостоятельно на шаге 2 (в т.ч. те, что не были указаны в
-   подсказке).
-3. Таблица соответствия "требование → статус реализации → комментарий".
-4. Список найденных проблем, разбитый по категориям: Критично / Важно /
-   Незначительно — для каждой проблемы: файл:строка, описание, конкретный
-   сценарий воспроизведения, рекомендация по исправлению.
-5. Список найденных нестыковок в use cases (если есть).
-6. Результат проверки UI: что именно проверено вживую (шаги, скриншоты/
-   описание), какие найдены визуальные/поведенческие проблемы, было ли
-   ограничение по проверке (если UI не поднимался — явно указать это).
-7. Результат проверки регрессии (что проверено, что сломано, что не
-   покрыто тестами).
-8. Итоговый чек-лист "prod-ready" с отметками done/not done.
+1. Brief summary: is the feature ready for release (yes / yes with remarks
+   / no).
+2. List of actually affected modules/services/functions/entry points,
+   found independently in step 2 (including those not specified in the
+   hint).
+3. A "requirement → implementation status → comment" traceability table.
+4. List of problems found, broken down by category: Critical / Important /
+   Minor — for each problem: file:line, description, a concrete
+   reproduction scenario, a recommendation for fixing it.
+5. List of use-case inconsistencies found (if any).
+6. UI verification result: what exactly was verified live (steps,
+   screenshots/description), which visual/behavioral problems were found,
+   whether there was a verification limitation (if the UI was not brought
+   up — state this explicitly).
+7. Regression verification result (what was checked, what is broken, what
+   is not covered by tests).
+8. Final "prod-ready" checklist with done/not done marks.
 
-Это ревью, не имплементация: инструменты редактирования файлов недоступны
-намеренно — только диагностика и рекомендации, правки делает разработчик.
+This is a review, not an implementation: file-editing tools are
+unavailable by design — only diagnosis and recommendations; the developer
+makes the changes.
+

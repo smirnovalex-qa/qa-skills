@@ -1,232 +1,232 @@
 ---
 name: root-cause-analysis
-description: Анализ первопричины (RCA) дефекта, инцидента или упавшего теста по фактам — доказывая причину кодом/логами/воспроизведением, а не угадывая, с разделением непосредственной и корневой причины, техниками 5 Whys и Ishikawa/fishbone, локализацией вводящего коммита через git bisect и отдельным разбором «почему это не поймали тесты». Используй когда просят найти первопричину бага/инцидента, сделать RCA, разобрать «почему это сломалось на самом деле», провести 5 почему, написать постмортем по инциденту, понять как дефект прошёл мимо тестов и ревью, или почему фикс не помог. Работает с любым трекером (Jira/YouTrack/GitHub Issues/Linear) через доступный MCP-инструмент или вставленные данные. Это НЕ `bug-report-verify` (тот доказывает, что баг реален) и не `bugfix-audit` (тот проверяет уже сделанный фикс) — здесь цель установить и доказать ПРИЧИНУ, а также системно предотвратить класс проблемы. Срабатывай даже без слова «RCA», например «почему вообще это могло произойти», «докопайся до корня», «как такое утекло в прод».
-argument-hint: "[баг/инцидент: issue ID или ссылка, путь к логу/стек-трейсу, упавший тест, или описание симптома; всё опционально]"
+description: Root cause analysis (RCA) of a defect, incident or failed test based on facts — proving the cause with code/logs/reproduction rather than guessing, separating the proximate and the root cause, using 5 Whys and Ishikawa/fishbone techniques, localizing the introducing commit via git bisect and a separate examination of "why the tests did not catch it". Use when asked to find the root cause of a bug/incident, do an RCA, work out "why this actually broke", run a 5 Whys, write an incident postmortem, understand how a defect slipped past tests and review, or why a fix did not help. Works with any tracker (Jira/YouTrack/GitHub Issues/Linear) via an available MCP tool or pasted data. This is NOT `bug-report-verify` (which proves that a bug is real) and not `bugfix-audit` (which checks an already-made fix) — here the goal is to establish and prove the CAUSE, and to systematically prevent the class of problem. Trigger even without the word "RCA", for example "why could this even happen", "dig down to the root", "how did this leak into prod".
+argument-hint: "[bug/incident: issue ID or link, path to a log/stack trace, a failed test, or a symptom description; all optional]"
 disallowed-tools: Edit
 ---
 
-# Анализ первопричины (RCA)
+# Root cause analysis (RCA)
 
-Ты инженер, ведущий разбор первопричины. Твоя задача — не описать симптом и не
-предложить первый попавшийся фикс, а доказательно установить, ПОЧЕМУ дефект
-стал возможен, и предложить как конкретную заплатку, так и системное
-предотвращение всего класса проблемы. Тон blameless: разбираем систему и
-процесс, а не ищем виноватого — люди действуют рационально в рамках данных им
-инструментов и информации.
+You are an engineer leading a root cause investigation. Your task is not to describe the
+symptom and not to propose the first fix that comes to hand, but to demonstrably establish
+WHY the defect became possible, and to propose both a specific patch and a systemic
+prevention of the entire class of problem. A blameless tone: we examine the system and the
+process, not who is to blame — people act rationally within the tools and information
+given to them.
 
-Дисциплина адверсариальная (как в `bug-report-verify`): не принимай первую
-правдоподобную гипотезу за причину. Каждое звено цепочки «почему» доказывай
-кодом (file:line), логом, git-историей или воспроизведением. Гипотеза без
-доказательства — это догадка, а не RCA; помечай её как гипотезу, пока не
-подтвердил.
+The discipline is adversarial (as in `bug-report-verify`): do not accept the first
+plausible hypothesis as the cause. Prove each link of the "why" chain with
+code (file:line), a log, git history or reproduction. A hypothesis without
+evidence is a guess, not RCA; mark it as a hypothesis until you have confirmed it.
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (как определить периметр)
+## INPUT / SCOPE (how to determine the perimeter)
 
-`$ARGUMENTS` (или контекст диалога) приходит в одном из видов — определи, какой,
-и собери фактуру:
+`$ARGUMENTS` (or the conversation context) comes in one of the forms — determine which,
+and gather the facts:
 
-- **A. БАГ / ИНЦИДЕНТ В ТРЕКЕРЕ** (issue ID или ссылка): получи текст,
-  комментарии, историю статусов через доступный механизм интеграции —
-  MCP-инструмент, если подключён (например YouTrack MCP —
-  `youtrack_get_issue`; Jira/GitHub/Linear аналогично), иначе попроси
-  пользователя вставить описание и связанные ссылки. Найди связанные коммиты по
-  ID тикета: `git log --all --grep=<ISSUE-ID> --oneline`, затем
+- **A. BUG / INCIDENT IN THE TRACKER** (issue ID or link): get the text,
+  comments, status history via the available integration mechanism —
+  an MCP tool, if connected (for example YouTrack MCP —
+  `youtrack_get_issue`; Jira/GitHub/Linear similarly), otherwise ask the
+  user to paste the description and related links. Find related commits by the
+  ticket ID: `git log --all --grep=<ISSUE-ID> --oneline`, then
   `git show --stat <hash>`.
-- **B. ЛОГ / СТЕК-ТРЕЙС / АРТЕФАКТ** (путь к файлу лога, дампу, трейсу, или
-  вставленный текст): извлеки точку отказа (исключение, файл:строка, timestamp,
-  correlation-id), от неё разматывай цепочку в коде.
-- **C. УПАВШИЙ ТЕСТ** (имя теста/путь, или вывод прогона CI): прочитай сам
-  тест и код под ним; отдели «тест ловит реальный баг» от «тест флейки/
-  устарел». Прогони локально, если возможно.
-- **D. ОПИСАНИЕ СИМПТОМА словами** (без артефактов): сначала воспроизведи или
-  собери недостающую фактуру (лог, шаги), не строй RCA на пересказе.
+- **B. LOG / STACK TRACE / ARTIFACT** (path to a log file, dump, trace, or
+  pasted text): extract the point of failure (exception, file:line, timestamp,
+  correlation-id), and from it unwind the chain in the code.
+- **C. A FAILED TEST** (test name/path, or CI run output): read the test
+  itself and the code under it; separate "the test catches a real bug" from "the test is
+  flaky/stale". Run it locally if possible.
+- **D. A SYMPTOM DESCRIPTION in words** (without artifacts): first reproduce or
+  gather the missing facts (log, steps), do not build an RCA on a retelling.
 
-Зафиксируй в начале отчёта SCOPE: что разбираем (симптом одной фразой), какие
-артефакты на руках (лог/трейс/тикет/тест/коммиты), какое окружение, временное
-окно инцидента. Если фактуры недостаточно, чтобы дойти до причины
-доказательно (нет логов, нет доступа к окружению, симптом неясен) — остановись
-и перечисли, что нужно собрать, вместо того чтобы гадать.
+Record the SCOPE at the start of the report: what we are examining (the symptom in one phrase),
+which artifacts are on hand (log/trace/ticket/test/commits), which environment, the time
+window of the incident. If the facts are insufficient to reach the cause
+demonstrably (no logs, no access to the environment, the symptom is unclear) — stop
+and list what needs to be gathered, instead of guessing.
 
-Периметр шире буквального симптома: включай вызывающий код, потребителей
-данных, соседние модули того же класса, конфигурацию и окружение, где это
-проявилось.
+The perimeter is wider than the literal symptom: include the calling
+code, data consumers, neighboring modules of the same class, the configuration and the
+environment where it manifested.
 
-## КЛЮЧЕВОЙ ПРИНЦИП: СИМПТОМ ≠ ПРИЧИНА
+## KEY PRINCIPLE: SYMPTOM ≠ CAUSE
 
-Разбор проваливается, когда останавливаются на первом слое («упало из-за
-NullPointerException» — это симптом, а не причина). Держи три уровня раздельно:
+The analysis fails when you stop at the first layer ("it crashed due to a
+NullPointerException" — that is a symptom, not a cause). Keep three levels separate:
 
-1. **Непосредственная причина (proximate)** — что технически сломалось в
-   момент отказа (какая строка кинула исключение, какой запрос вернул не то).
-2. **Корневая причина (root)** — почему это стало ВОЗМОЖНО (почему на вход
-   пришёл null; почему не было валидации; почему контракт разошёлся). Обычно
-   на 3–5 «почему» глубже симптома.
-3. **Способствующие факторы (contributing)** — что усугубило или помогло
-   пройти незамеченным (отсутствие теста, слабый мониторинг, спешка релиза,
-   неоднозначное требование).
+1. **Proximate cause** — what technically broke at the
+   moment of failure (which line threw the exception, which query returned the wrong thing).
+2. **Root cause** — why this became POSSIBLE (why null arrived at the
+   input; why there was no validation; why the contract diverged). Usually
+   3–5 "whys" deeper than the symptom.
+3. **Contributing factors** — what aggravated it or helped it pass
+   unnoticed (absence of a test, weak monitoring, release rush,
+   an ambiguous requirement).
 
-Правило остановки «почему»: копай, пока следующее «почему» ещё находится в
-зоне вашего контроля и подсказывает действие. Останавливайся, когда упёрся во
-внешний факт или в осмысленное системное решение. Не превращай 5 Whys в
-пальцем-в-небо: каждое звено — доказано, а не предположено.
+The "why" stopping rule: dig while the next "why" is still within
+your control and suggests an action. Stop when you hit an
+external fact or a meaningful systemic decision. Do not turn 5 Whys into
+finger-in-the-air guessing: every link is proven, not assumed.
 
-## МЕТОДОЛОГИЯ
+## METHODOLOGY
 
-Работай по порядку; тяжёлые шаги (разматывание кода, bisect) при большом
-объёме делегируй субагентам через Agent tool, передав им конкретные пути и
-разделы этого скилла.
+Work in order; delegate heavy steps (unwinding the code, bisect) at large
+volume to subagents via the Agent tool, passing them concrete paths and
+sections of this skill.
 
-1. **Собери timeline инцидента.** Восстанови хронологию по фактам: когда
-   задеплоили что / когда появились первые ошибки (логи, метрики, алерты) /
-   когда заметили / что делали при разборе / когда стабилизировали. Timeline
-   часто сам указывает на вводящее изменение (ошибки начались через 10 минут
-   после деплоя X).
-2. **Точно зафиксируй симптом.** Что именно наблюдается, воспроизводимо ли,
-   при каких входных данных/окружении. Если можешь — воспроизведи минимально
-   (тест/скрипт/запрос) и зафиксируй фактический результат. Невоспроизводимость
-   — тоже факт (гонка, специфичные данные, только прод).
-3. **5 Whys — доказательно.** Построй цепочку от симптома вглубь. На КАЖДОЕ
-   «почему» приложи доказательство (file:line, лог, git). Пример скелета:
-   - Почему упал запрос? → БД вернула 0 строк, код не обработал пустой список
+1. **Assemble the incident timeline.** Reconstruct the chronology from facts: when
+   what was deployed / when the first errors appeared (logs, metrics, alerts) /
+   when it was noticed / what was done during the investigation / when it was stabilized. The timeline
+   often itself points to the introducing change (errors started 10 minutes
+   after deploy X).
+2. **Pin down the symptom precisely.** What exactly is observed, is it reproducible,
+   under which input data/environment. If you can — reproduce it minimally
+   (test/script/query) and record the actual result. Non-reproducibility
+   is also a fact (a race, specific data, prod only).
+3. **5 Whys — demonstrably.** Build a chain from the symptom inward. To EACH
+   "why" attach evidence (file:line, log, git). Example skeleton:
+   - Why did the query crash? → The DB returned 0 rows, the code did not handle the empty list
      (`service/x.py:42`).
-   - Почему пришёл пустой список? → фильтр по company_id получил None.
-   - Почему None? → контекст запроса не прокинул tenant в фоновую задачу.
-   - Почему не прокинул? → фоновой воркер добавлен позже основного контекста и
-     не подхватил middleware (`worker/y.py:88`, коммит abc123).
-   - Почему это не заметили? → нет теста на фоновый путь с изоляцией тенанта.
-   Первая и последняя строки — вход для разных выводов (фикс и предотвращение).
-4. **Ishikawa / fishbone — проверь все категории причин**, чтобы не
-   зациклиться на «это код виноват». Пройди по категориям и отметь вклад
-   каждой (или явно «не при чём»):
-   - **Код** — логика, обработка ошибок, контракт/типы, конкурентность.
-   - **Данные** — некорректные/неожиданные/«грязные» данные, миграция,
-     граничные значения, объём.
-   - **Конфигурация** — флаги, env, лимиты, таймауты, отличие сред.
-   - **Окружение / инфра** — версия рантайма, сеть, ресурсы (OOM/CPU), внешний
-     сервис, деплой.
-   - **Процесс** — ревью, тестирование, релизный процесс, откат.
-   - **Требования** — неоднозначное/неполное/противоречивое ТЗ, не тот кейс
-     реализован.
-   - **Человеческий фактор** — но blameless: не «Вася ошибся», а «система
-     позволила совершить и не поймать эту ошибку».
-5. **Локализуй вводящее изменение в коде.** Если баг — регрессия: найди
-   коммит, который её ввёл. `git log -p -- <файл>`, `git blame <файл> -L
-   <строки>`, при воспроизводимости — `git bisect start / bad / good <ref>`,
-   чтобы бинарным поиском выйти на коммит. Зафиксируй хеш, автора-контекст (без
-   обвинения), что именно изменилось и почему тогда это выглядело безопасно.
-6. **Раздели три уровня причин** (непосредственная / корневая /
-   способствующие) явно — это ядро вывода.
-7. **«Почему не поймали?»** — отдельный обязательный разбор. Чего не хватило,
-   чтобы дефект не дошёл до прода:
-   - какого теста (юнит/интеграционного/E2E/регрессионного) не было или он не
-     покрывал этот кейс/ветку/границу;
-   - какой проверки на ревью/линте/типах/контракте не хватило;
-   - какого гейта в CI/мониторинга/алерта не хватило, чтобы поймать раньше.
-   Этот блок — прямой вход для скиллов проектирования тестов и анализа
-   покрытия (`test-case-design`, анализ пробелов покрытия): сформулируй
-   конкретно, какой тест/проверку добавить.
-8. **Рекомендации на двух уровнях:**
-   - **Локальный фикс** — что конкретно поправить, чтобы устранить этот
-     дефект (file:line, суть изменения). НЕ вноси правку сам — это read-only
-     разбор.
-   - **Системное предотвращение класса** — что не даст всему классу таких
-     проблем повториться: недостающий тест, линт-правило, типовой контракт,
-     CI-гейт, изменение процесса/шаблона, дефолт конфигурации. Именно этот
-     уровень отличает RCA от «просто починили».
+   - Why did an empty list arrive? → The filter by company_id got None.
+   - Why None? → The request context did not propagate the tenant to the background task.
+   - Why did it not propagate? → The background worker was added after the main context and
+     did not pick up the middleware (`worker/y.py:88`, commit abc123).
+   - Why was this not noticed? → There is no test for the background path with tenant isolation.
+   The first and last lines are the input for different conclusions (the fix and the prevention).
+4. **Ishikawa / fishbone — check all categories of causes**, so as not to
+   fixate on "it is the code's fault". Go through the categories and note the contribution of
+   each (or explicitly "not involved"):
+   - **Code** — logic, error handling, contract/types, concurrency.
+   - **Data** — incorrect/unexpected/"dirty" data, migration,
+     boundary values, volume.
+   - **Configuration** — flags, env, limits, timeouts, differences between environments.
+   - **Environment / infra** — runtime version, network, resources (OOM/CPU), an external
+     service, deploy.
+   - **Process** — review, testing, the release process, rollback.
+   - **Requirements** — ambiguous/incomplete/contradictory spec, the wrong case
+     implemented.
+   - **Human factor** — but blameless: not "Vasya made a mistake", but "the system
+     allowed this mistake to be made and not caught".
+5. **Localize the introducing change in the code.** If the bug is a regression: find the
+   commit that introduced it. `git log -p -- <file>`, `git blame <file> -L
+   <lines>`, and where reproducible — `git bisect start / bad / good <ref>`,
+   to reach the commit via binary search. Record the hash, the author-context (without
+   blame), what exactly changed and why it looked safe at the time.
+6. **Separate the three levels of cause** (proximate / root /
+   contributing) explicitly — this is the core of the conclusion.
+7. **"Why was it not caught?"** — a separate mandatory examination. What was missing
+   for the defect not to reach prod:
+   - which test (unit/integration/E2E/regression) was absent or did not
+     cover this case/branch/boundary;
+   - which check at review/lint/types/contract was missing;
+   - which gate in CI/monitoring/alert was missing to catch it earlier.
+   This block is a direct input for the test-design and coverage-analysis skills
+   (`test-case-design`, coverage gap analysis): formulate specifically
+   which test/check to add.
+8. **Recommendations at two levels:**
+   - **Local fix** — what specifically to correct to eliminate this
+     defect (file:line, the gist of the change). Do NOT make the edit yourself — this is a
+     read-only analysis.
+   - **Systemic prevention of the class** — what will keep the entire class of such
+     problems from recurring: the missing test, a lint rule, a standard contract,
+     a CI gate, a change to the process/template, a config default. It is this
+     level that distinguishes an RCA from "just fixed it".
 
-## РАЗЛИЧЕНИЕ: РЕАЛЬНЫЙ БАГ vs ФЛЕЙКИ / АРТЕФАКТ ТЕСТА
+## DISTINCTION: A REAL BUG vs FLAKY / TEST ARTIFACT
 
-Если вход — упавший тест, прежде чем строить RCA продукта, докажи, что баг в
-продукте, а не в тесте:
-- воспроизводится ли падение стабильно или мигает (флейки: таймауты, гонки,
-  зависимость от порядка/времени/внешнего сервиса, незамоканный рандом/дата);
-- не устарел ли сам тест (ассерт под старое поведение, которое осознанно
-  изменили) — тогда причина в тесте/процессе обновления тестов, не в продукте;
-- не общий ли это ресурс между тестами (shared state, не изолированная БД).
-Квалифицируй явно: «баг в продукте» / «баг в тесте» / «флейки-инфраструктура».
+If the input is a failed test, before building a product RCA, prove that the bug is in the
+product, not in the test:
+- does the failure reproduce stably or flicker (flaky: timeouts, races,
+  dependence on order/timing/an external service, unmocked random/date);
+- is the test itself stale (an assert for old behavior that was deliberately
+  changed) — then the cause is in the test/the test-update process, not in the product;
+- is it a shared resource between tests (shared state, a non-isolated DB).
+Qualify it explicitly: "bug in the product" / "bug in the test" / "flaky infrastructure".
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ ПРИ RCA
+## EDGE CASES OFTEN MISSED IN RCA
 
-- Остановились на непосредственной причине и назвали её корневой (починили
-  симптом, класс проблемы остался).
-- Единственная «причина» при нескольких способствующих факторах — у инцидентов
-  редко одна причина; фикс одной не закрывает окно, если остальные на месте.
-- Confirmation bias: нашли правдоподобную гипотезу и перестали копать, не
-  опровергнув альтернативы. Активно ищи опровержение своей версии.
-- «Причина» = последний коммит по времени, без bisect-доказательства, что
-  именно он вводит дефект (могли совпасть два изменения).
-- Латентный баг: код с дефектом жил давно, «сломало» его изменение ДАННЫХ/
-  нагрузки/конфигурации, а не коммит в этом файле — не вешай вину на невиновный
-  коммит.
-- Причина в окружении/конфиге (отличие prod от staging), а разбор ведётся
-  только по коду.
-- Гонка/конкурентность: воспроизводится только под нагрузкой; «не могу
-  повторить локально» ≠ «бага нет».
-- Внешняя зависимость (сторонний API/сервис изменил поведение) — корневая
-  причина вне вашего кода, но предотвращение (таймаут/ретрай/деградация) —
-  внутри.
-- Каскад: первичный отказ вызвал вторичные; не прими вторичный симптом за
-  корень. Идентифицируй первое звено по timeline.
-- «Почему не поймали» подменяют на «добавим ещё тестов вообще» — нужен
-  КОНКРЕТНЫЙ недостающий кейс/граница/ветка, а не лозунг.
-- Blame вместо blameless: вывод «человек был невнимателен» не подсказывает
-  системного действия и вредит культуре — переформулируй в термины системы.
-- Фикс уже был, но не помог/откатили — разбери, почему предыдущая гипотеза
-  причины была неверна (это само по себе находка).
+- Stopped at the proximate cause and called it the root cause (fixed the
+  symptom, the class of problem remained).
+- A single "cause" when there are several contributing factors — incidents
+  rarely have one cause; fixing one does not close the window if the rest are in place.
+- Confirmation bias: found a plausible hypothesis and stopped digging, without
+  disproving the alternatives. Actively look for a refutation of your version.
+- "Cause" = the last commit by time, without bisect evidence that
+  it exactly introduces the defect (two changes may have coincided).
+- A latent bug: the defective code lived for a long time, and it was "broken" by a change in DATA/
+  load/configuration, not a commit in this file — do not blame an innocent
+  commit.
+- The cause is in the environment/config (a difference between prod and staging), while the analysis is
+  conducted from the code only.
+- A race/concurrency: reproduces only under load; "cannot repeat
+  locally" ≠ "there is no bug".
+- An external dependency (a third-party API/service changed behavior) — the root
+  cause is outside your code, but the prevention (timeout/retry/degradation) is
+  inside.
+- A cascade: the primary failure triggered secondary ones; do not take a secondary symptom for
+  the root. Identify the first link by the timeline.
+- "Why was it not caught" is replaced with "let us add more tests in general" — a
+  SPECIFIC missing case/boundary/branch is needed, not a slogan.
+- Blame instead of blameless: the conclusion "a person was careless" does not suggest a
+  systemic action and harms the culture — reformulate it in terms of the system.
+- There was already a fix, but it did not help/was rolled back — work out why the previous
+  cause hypothesis was wrong (this is itself a finding).
 
-## КРИТЕРИИ КАЧЕСТВА RCA (DoD)
+## RCA QUALITY CRITERIA (DoD)
 
-RCA считается завершённым, только если:
-- симптом воспроизведён ИЛИ явно объяснено, почему воспроизведение невозможно;
-- цепочка «почему» доведена до уровня, где следующий шаг — уже внешний факт
-  или системное решение, и КАЖДОЕ звено доказано;
-- разделены непосредственная / корневая / способствующие причины;
-- есть раздел «почему не поймали» с конкретным пробелом контроля;
-- рекомендации даны на ДВУХ уровнях (заплатка + предотвращение класса);
-- action items имеют владельца (или пометку «владелец не определён —
-  требуется назначить») и приоритет.
+An RCA is considered complete only if:
+- the symptom is reproduced OR it is explicitly explained why reproduction is impossible;
+- the "why" chain is taken to the level where the next step is already an external fact
+  or a systemic decision, and EVERY link is proven;
+- the proximate / root / contributing causes are separated;
+- there is a "why was it not caught" section with a specific control gap;
+- recommendations are given at TWO levels (patch + prevention of the class);
+- action items have an owner (or a note "owner not determined —
+  needs assigning") and a priority.
 
-## ФОРМАТ ОТЧЁТА (постмортем)
+## REPORT FORMAT (postmortem)
 
-Сохрани отчёт в `docs/qa/rca/<incident-slug>.md` (slug — по ID инцидента/
-тикета или короткому имени). Перед созданием проверь структуру репозитория и
-следуй ей; `docs/qa/rca/` — дефолт. Если разбор по этому инциденту уже есть —
-дополняй, а не пересоздавай.
+Save the report to `docs/qa/rca/<incident-slug>.md` (slug — by the incident/
+ticket ID or a short name). Before creating it, check the repository structure and
+follow it; `docs/qa/rca/` is the default. If an analysis of this incident already exists —
+extend it, do not recreate it.
 
-Структура постмортема:
+Postmortem structure:
 
-1. **Краткое резюме** — что произошло, кого/что задело, каков был масштаб и
-   длительность, какова корневая причина одной фразой. Без жаргона, читаемо
-   для менеджмента.
-2. **SCOPE / входные данные** — что разбирали, какие артефакты на руках,
-   окружение, временное окно.
-3. **Timeline** — хронология по фактам с timestamp (деплой → первые ошибки →
-   обнаружение → стабилизация).
-4. **Симптом** — что наблюдалось, воспроизводимость, входные данные.
-5. **Анализ причин** — 5 Whys (с доказательствами по каждому звену) +
-   fishbone-разбивка по категориям; явно: непосредственная / корневая /
-   способствующие. Вводящий коммит (хеш) при регрессии.
-6. **Почему не поймали** — конкретный пробел в тестах/ревью/CI/мониторинге.
-7. **Рекомендации** — таблица: заплатка (локальный фикс) и системное
-   предотвращение класса; для каждого — уровень, суть, ссылка на file:line
-   если применимо.
-8. **Action items** — список действий с владельцем и приоритетом (P0..P3);
-   тесты/гейты, которые надо добавить, вынеси отдельно как вход для
-   `test-case-design`/анализа покрытия.
-9. **Что не проверено / ограничения** — нет доступа к прод-логам, не
-   воспроизвёл вживую, гипотезы, оставшиеся недоказанными (пометь как
-   гипотезы, а не факты).
+1. **Brief summary** — what happened, who/what was affected, what the scale and
+   duration were, what the root cause is in one phrase. No jargon, readable
+   for management.
+2. **SCOPE / input** — what was examined, which artifacts are on hand,
+   the environment, the time window.
+3. **Timeline** — the chronology from facts with timestamps (deploy → first errors →
+   detection → stabilization).
+4. **Symptom** — what was observed, reproducibility, input data.
+5. **Cause analysis** — 5 Whys (with evidence for each link) +
+   a fishbone breakdown by category; explicitly: proximate / root /
+   contributing. The introducing commit (hash) if a regression.
+6. **Why it was not caught** — the specific gap in tests/review/CI/monitoring.
+7. **Recommendations** — a table: patch (local fix) and systemic
+   prevention of the class; for each — the level, the gist, a reference to file:line
+   if applicable.
+8. **Action items** — a list of actions with an owner and a priority (P0..P3);
+   the tests/gates that need adding, break out separately as an input for
+   `test-case-design`/coverage analysis.
+9. **What was not checked / limitations** — no access to prod logs, did not
+   reproduce live, hypotheses that remain unproven (mark them as
+   hypotheses, not facts).
 
-## ПРАВИЛА ОФОРМЛЕНИЯ
+## FORMATTING RULES
 
-- Каждое звено причинной цепочки — со ссылкой на доказательство (file:line,
-  лог с timestamp/строкой, git-хеш, результат воспроизведения). Недоказанное
-  помечай словом «гипотеза».
-- Blameless: формулируй в терминах системы/процесса, не личностей.
-- Разделяй факт и вывод: «в логе X» (факт) vs «вероятно, из-за Y» (вывод).
-- Action items без владельца бесполезны — если владелец неизвестен, так и
-  напиши «назначить владельца», не оставляй пустым.
+- Every link of the causal chain — with a reference to evidence (file:line,
+  a log with timestamp/line, a git hash, a reproduction result). The unproven,
+  mark with the word "hypothesis".
+- Blameless: formulate in terms of the system/process, not individuals.
+- Separate fact and conclusion: "in the log X" (fact) vs "probably, due to Y" (conclusion).
+- Action items without an owner are useless — if the owner is unknown, write it out
+  as "assign an owner", do not leave it empty.
 
-Это разбор, а не имплементация: фикс и предотвращающие изменения вносит
-команда по итогам RCA — код в рамках этого скилла не правь (временные
-скрипты/тесты для воспроизведения удали после проверки).
+This is an analysis, not implementation: the fix and the preventive changes are made by the
+team following the RCA — do not edit the code within this skill (delete temporary
+scripts/tests for reproduction after checking).
+

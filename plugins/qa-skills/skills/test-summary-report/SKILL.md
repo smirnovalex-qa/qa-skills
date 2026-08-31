@@ -1,203 +1,215 @@
 ---
 name: test-summary-report
-description: Формирует итоговый отчёт о тестировании (Test Summary Report, QA sign-off) для стейкхолдеров по циклу/релизу — что тестировалось и что нет, сводка результатов кейсов (passed/failed/blocked/skipped) и покрытия требований, найденные дефекты по severity, остаточные риски и known issues, нефункциональные результаты, метрики качества, вердикт-рекомендация и приложения со ссылками. Используй когда просят «отчёт о тестировании», «test summary report», «итоги тестирования релиза/цикла», «QA sign-off», «что протестировано и с каким результатом», «отчёт по прогону тест-цикла», «сводку для менеджмента по качеству», «резюме тестирования перед релизом» — даже если термин не произнесён, а говорят «собери, что мы натестили», «нужен документ для стейкхолдеров про качество релиза», «подведи итоги QA». Тон — для менеджмента (executive summary без жаргона) плюс технические приложения. Данные собираются из CI/трекера/предыдущих отчётов в docs/qa; при отсутствии данных скилл честно помечает пробелы, а не выдумывает цифры.
-argument-hint: "[цикл/релиз/версия] [ссылки на прогоны CI, отчёты аудитов, фильтр трекера] — всё опционально, агент соберёт доступное"
+description: Produces a Test Summary Report (QA sign-off) for stakeholders on a cycle/release — what was and wasn't tested, a summary of case results (passed/failed/blocked/skipped) and requirements coverage, defects found by severity, residual risks and known issues, non-functional results, quality metrics, a verdict-recommendation, and appendices with links. Use when asked for a "test report", "test summary report", "testing results for a release/cycle", "QA sign-off", "what was tested and with what result", "a report on the test-cycle run", "a quality summary for management", "a testing recap before release" — even if the term isn't said and it's phrased as "pull together what we tested", "we need a document for stakeholders about the release quality", "wrap up the QA". Tone — for management (executive summary without jargon) plus technical appendices. Data is gathered from CI/the tracker/previous reports in docs/qa; when data is missing the skill honestly flags the gaps rather than inventing numbers.
+argument-hint: "[cycle/release/version] [links to CI runs, audit reports, tracker filter] — all optional, the agent will gather what's available"
 disallowed-tools: Edit
 ---
 
-# Итоговый отчёт о тестировании (Test Summary Report / QA sign-off)
+# Test Summary Report (QA sign-off)
 
-Ты QA-лид, который сводит результаты цикла тестирования в один документ для
-стейкхолдеров и даёт формальную рекомендацию по релизу. Формат — по мотивам
-IEEE 829 Test Summary Report, но прагматично: без бюрократии, с упором на
-решение и доказательства. Дисциплина: **каждая цифра и вывод — из источника**
-(прогон CI, фильтр трекера, отчёт профильного скилла, лог прогона), а не из
-головы. Если данных нет — отчёт честно фиксирует пробел («данные по E2E-прогону
-недоступны»), но **не выдумывает** проценты и количества. Отсутствие данных —
-это тоже вывод отчёта, а не повод их сочинить.
+You are a QA lead who folds the results of a testing cycle into a single
+document for stakeholders and gives a formal release recommendation. The format
+is based on the IEEE 829 Test Summary Report, but pragmatically: no bureaucracy,
+with an emphasis on the decision and the evidence. Discipline: **every number
+and conclusion comes from a source** (a CI run, a tracker filter, a dedicated
+skill's report, a run log), not from your head. If data is missing — the report
+honestly records the gap ("data on the E2E run is unavailable"), but does
+**not invent** percentages and counts. Absence of data is also a conclusion of
+the report, not a reason to make it up.
 
-Ты агрегируешь и оформляешь уже полученные результаты, а не проводишь
-тестирование заново. Где данных не хватает и их можно дёшево добрать (прогнать
-тесты, запросить фильтр трекера) — добери; где нужна глубокая проверка — сошлись
-на профильный отчёт (feature-review, security-audit, performance-audit,
-release-readiness) или пометь как непокрытое.
+You aggregate and present already-obtained results, rather than re-running the
+testing. Where data is missing and can be gathered cheaply (run the tests,
+request a tracker filter) — gather it; where a deep check is needed — reference
+the dedicated report (feature-review, security-audit, performance-audit,
+release-readiness) or mark it as not covered.
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (за какой цикл отчёт)
+## INPUT / SCOPE (which cycle the report is for)
 
-`$ARGUMENTS` и контекст диалога задают периметр отчётности — определи и
-зафиксируй в начале документа.
+`$ARGUMENTS` and the dialog context set the reporting perimeter — determine and
+record it at the start of the document.
 
-- **A. РЕЛИЗ / ВЕРСИЯ / ТЕГ** — отчёт по всему, что вошло в релиз: собери набор
-  тикетов/фич по диапазону коммитов (`git log <прошлый-тег>..<HEAD>`,
-  `--grep=<ID>`), сопоставь с прогонами тестов на релизном коммите.
-- **B. ТЕСТ-ЦИКЛ / СПРИНТ / ПРОГОН** — отчёт по конкретному прогону (набор
-  кейсов, окно тестирования): собери результаты из CI/трекера за этот период.
-- **C. ФИЧА / МОДУЛЬ** — отчёт по тестированию одной области; периметр = её
-  файлы/эндпоинты/экраны + смежное, что проверялось на регрессию.
+- **A. RELEASE / VERSION / TAG** — a report on everything that went into the
+  release: gather the set of tickets/features by commit range (`git log
+  <prev-tag>..<HEAD>`, `--grep=<ID>`), map them to test runs on the release
+  commit.
+- **B. TEST CYCLE / SPRINT / RUN** — a report on a specific run (a set of cases,
+  a testing window): gather the results from CI/the tracker for that period.
+- **C. FEATURE / MODULE** — a report on testing a single area; the perimeter =
+  its files/endpoints/screens + the adjacent things checked for regression.
 
-Источники данных (собери, что доступно, зафиксируй, откуда взято):
-- **CI/пайплайн** — прогоны unit/integration/E2E/API, отчёты покрытия, артефакты
-  (определи CI по конфигам: GitHub Actions/GitLab CI/Jenkins/…).
-- **Issue/трекер** (Jira/YouTrack/GitHub Issues/Linear) — дефекты по периметру:
-  фильтр по severity, статусу (open/closed), метке релиза. Через доступную
-  интеграцию (MCP-инструмент, если подключён); если доступа нет — запроси у
-  пользователя выгрузку/фильтр, не додумывай числа.
-- **Предыдущие отчёты** в `docs/qa/` и `docs/bugs/` — отчёты аудитов
-  безопасности/производительности/доступности, отчёт release-readiness,
-  тест-планы/чек-листы, из которых берётся статус нефункциональных проверок.
-- **Логи прогонов тестов** — если можешь запустить сам, запусти и приложи вывод.
+Data sources (gather what's available, record where it came from):
+- **CI/pipeline** — unit/integration/E2E/API runs, coverage reports, artifacts
+  (determine the CI from configs: GitHub Actions/GitLab CI/Jenkins/…).
+- **Issue/tracker** (Jira/YouTrack/GitHub Issues/Linear) — defects in the
+  perimeter: filter by severity, status (open/closed), release label. Via an
+  available integration (an MCP tool, if connected); if there's no access —
+  request an export/filter from the user, don't make up numbers.
+- **Previous reports** in `docs/qa/` and `docs/bugs/` — security/performance/
+  accessibility audit reports, the release-readiness report, test plans/
+  checklists, from which the status of non-functional checks is taken.
+- **Test run logs** — if you can run them yourself, run them and attach the
+  output.
 
-Если периметр не определить (непонятно, за какой релиз/цикл отчёт) —
-остановись и уточни. Если определён периметр, но нет данных о прогоне — это не
-повод отказаться: составь отчёт с явными пробелами в разделах, где данных нет.
+If the perimeter cannot be determined (it's unclear which release/cycle the
+report is for) — stop and clarify. If the perimeter is determined but there's no
+run data — that's no reason to bail: compose the report with explicit gaps in
+the sections where data is missing.
 
-## КЛЮЧЕВОЙ ПРИНЦИП: ОТЧЁТ ФИКСИРУЕТ ФАКТ, А НЕ ЖЕЛАЕМОЕ
+## KEY PRINCIPLE: THE REPORT RECORDS FACT, NOT WISHFUL THINKING
 
-- Не пиши «все тесты пройдены», если видел только unit; напиши, какие уровни
-  прогонялись, а какие — нет.
-- Не превращай «0 найденных багов» в «багов нет»: 0 найденных при непроведённом
-  тестировании области — это непокрытие, а не качество. Разделяй «проверено и
-  чисто» от «не проверено».
-- Числа сверяй с источником и указывай источник рядом. «12 из 47 кейсов упало
-  (прогон CI #338)» — да; «в основном всё зелёное» — нет.
-- Вердикт должен следовать из данных отчёта, а не из оптимизма. Открытый
-  Critical в периметре несовместим с «готово к релизу».
+- Don't write "all tests passed" if you only saw unit; write which levels were
+  run and which weren't.
+- Don't turn "0 bugs found" into "no bugs": 0 found with the area untested is a
+  coverage gap, not quality. Distinguish "verified and clean" from "not
+  verified".
+- Reconcile numbers against the source and cite the source next to them. "12 of
+  47 cases failed (CI run #338)" — yes; "mostly all green" — no.
+- The verdict must follow from the report's data, not from optimism. An open
+  Critical in the perimeter is incompatible with "ready to release".
 
-## СТРУКТУРА ОТЧЁТА (по мотивам IEEE 829, прагматично)
+## REPORT STRUCTURE (based on IEEE 829, pragmatically)
 
-Собери документ из следующих разделов. Тон верхних разделов — для менеджмента
-(executive summary без технического жаргона); технические детали и логи — в
-приложениях.
+Assemble the document from the following sections. The tone of the upper
+sections is for management (executive summary without technical jargon);
+technical details and logs go in the appendices.
 
-1. **Обзор / что тестировалось (scope)**
-   - Объекты тестирования: сервисы/модули/экраны/версии, вошедшие в цикл.
-   - Что покрывалось: типы тестирования (функциональное, регрессия,
-     интеграционное, E2E, API, нефункциональное — что именно проводилось).
-   - Окружение(я), на которых тестировали (dev/staging/…), сборка/версия.
-   - Период/цикл, участники (если релевантно).
+1. **Overview / what was tested (scope)**
+   - Test objects: services/modules/screens/versions that went into the cycle.
+   - What was covered: types of testing (functional, regression,
+     integration, E2E, API, non-functional — what exactly was performed).
+   - The environment(s) tested on (dev/staging/…), build/version.
+   - Period/cycle, participants (if relevant).
 
-2. **Что НЕ тестировалось и почему**
-   - Области, сознательно оставленные за периметром (нет доступа к прод, нет
-     окружения, headless, не хватило времени, отложено на следующий цикл).
-   - Это критично: без этого раздела «нет находок» ложно читается как «всё
-     чисто».
+2. **What was NOT tested and why**
+   - Areas deliberately left out of the perimeter (no access to prod, no
+     environment, headless, ran out of time, deferred to the next cycle).
+   - This is critical: without this section "no findings" falsely reads as "all
+     clean".
 
-3. **Сводка результатов**
-   - Кейсы: passed / failed / blocked / skipped — числами и в разбивке по типам/
-     модулям (таблица). Каждая цифра — со ссылкой на прогон/источник.
-   - Покрытие требований: сколько acceptance criteria/требований проверено,
-     сколько закрыто, сколько не покрыто (сопоставь с requirements/тикетами).
-   - Разбивка по тестовой пирамиде: что дал unit / integration / E2E / API-
-     контракт, если данные есть.
+3. **Results summary**
+   - Cases: passed / failed / blocked / skipped — in numbers and broken down by
+     type/module (table). Each number — with a link to the run/source.
+   - Requirements coverage: how many acceptance criteria/requirements were
+     verified, how many closed, how many not covered (map against requirements/
+     tickets).
+   - Breakdown by the test pyramid: what unit / integration / E2E / API
+     contract yielded, if data exists.
 
-4. **Найденные дефекты**
-   - Сводка по severity (Critical/High/Medium/Low) и статусу (open/closed) —
-     таблица с числами и ссылками на тикеты.
-   - Критичные/блокирующие — перечисли отдельно: что именно, что блокирует,
-     статус фикса.
-   - Тренд, если есть данные предыдущего цикла (стало лучше/хуже).
+4. **Defects found**
+   - Summary by severity (Critical/High/Medium/Low) and status (open/closed) —
+     a table with numbers and links to tickets.
+   - Critical/blocking ones — list separately: what exactly, what it blocks, fix
+     status.
+   - Trend, if there's data from the previous cycle (better/worse).
 
-5. **Оценка качества и рисков**
-   - Остаточные риски: что может сломаться на проде, что покрыто слабо.
-   - Known issues — известные проблемы, идущие в релиз осознанно, с тикетами и
-     обоснованием (почему допустимо выпускать с ними).
-   - Оценка стабильности/зрелости релиза в целом.
+5. **Quality and risk assessment**
+   - Residual risks: what could break in prod, what is weakly covered.
+   - Known issues — issues shipping in the release deliberately, with tickets and
+     justification (why it's acceptable to release with them).
+   - An assessment of the release's overall stability/maturity.
 
-6. **Нефункциональные результаты** (если проводились)
-   - Производительность (из performance-audit/нагрузочных прогонов): в пределах
-     SLA или есть деградации.
-   - Безопасность (из security-audit): статус, открытые находки по severity.
-   - Доступность (a11y/WCAG), совместимость, локализация — если проверялись.
-   - Если направление не проверялось — так и укажи (не пропускай молча).
+6. **Non-functional results** (if performed)
+   - Performance (from performance-audit/load runs): within SLA or there are
+     regressions.
+   - Security (from security-audit): status, open findings by severity.
+   - Accessibility (a11y/WCAG), compatibility, localization — if they were
+     checked.
+   - If a direction wasn't checked — say so (don't skip it silently).
 
-7. **Метрики** (где данные позволяют, без натягивания)
-   - Плотность дефектов (дефекты на объём кода/на фичу), процент упавших кейсов,
-     покрытие кода (общее и на новом коде/diff), доля автоматизации, время
-     прогона. Каждая метрика — с источником; если не считается — не выдумывай.
+7. **Metrics** (where data allows, without stretching)
+   - Defect density (defects per amount of code/per feature), percentage of
+     failed cases, code coverage (overall and on the new code/diff), automation
+     share, run time. Each metric — with a source; if it can't be computed —
+     don't invent it.
 
-8. **Вердикт / рекомендация**
-   - Одной фразой: **готово к релизу** / **готово с оговорками** / **не готово**.
-   - Обоснование из данных отчёта; при «с оговорками» — список условий; при
-     «не готово» — список блокеров. Согласуй с release-readiness, если он
-     проводился, — не противоречь его вердикту без объяснения.
+8. **Verdict / recommendation**
+   - In one sentence: **ready to release** / **ready with caveats** / **not
+     ready**.
+   - Justification from the report's data; for "with caveats" — a list of
+     conditions; for "not ready" — a list of blockers. Reconcile with
+     release-readiness, if it was performed — don't contradict its verdict
+     without explanation.
 
-9. **Приложения**
-   - Ссылки на баги (тикеты), детальные логи прогонов, отчёты аудитов
-     (security/performance/a11y), тест-план/чек-листы, артефакты покрытия,
-     скриншоты. Всё, что подтверждает цифры верхних разделов.
+9. **Appendices**
+   - Links to bugs (tickets), detailed run logs, audit reports
+     (security/performance/a11y), the test plan/checklists, coverage artifacts,
+     screenshots. Everything that backs up the numbers in the upper sections.
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ
+## EDGE CASES THAT ARE OFTEN MISSED
 
-- «Все тесты зелёные» при том, что гонялся только unit, а E2E/интеграционные не
-  запускались вовсе — отчёт создаёт ложную уверенность.
-- Раздел «что не тестировалось» отсутствует — 0 находок читается как гарантия
-  качества.
-- Blocked-кейсы посчитаны как passed или просто выпали из сводки — реальное
-  покрытие завышено.
-- Дефекты закрыты как «won't fix»/«не воспроизводится», но остаются реальными
-  рисками — не отражены в known issues.
-- Покрытие кода приведено общим числом по репозиторию (высокое за счёт старого
-  кода), а на новом коде релиза оно низкое — метрика вводит в заблуждение.
-- Открытый Critical/High в периметре, но вердикт «готово» — вердикт не следует
-  из данных.
-- Числа взяты «на глаз» без ссылки на прогон/тикет — отчёт невозможно
-  перепроверить.
-- Нефункциональные направления (перф/безопасность/a11y) молча пропущены, хотя
-  релиз их затрагивает.
-- Flaky-падения посчитаны как реальные дефекты (или наоборот, реальные баги
-  списаны на флаки) — искажает и метрики, и вердикт.
-- Отчёт по «релизу», но набор вошедших тикетов не сверен с диапазоном коммитов —
-  часть изменений не отражена.
-- Executive summary написан на техжаргоне — стейкхолдеры не считывают решение.
-- Метрики посчитаны от неполных данных и поданы как точные — плотность дефектов
-  «низкая», потому что половину области не тестировали.
+- "All tests green" while only unit was run and E2E/integration weren't run at
+  all — the report creates false confidence.
+- The "what was not tested" section is missing — 0 findings reads as a quality
+  guarantee.
+- Blocked cases counted as passed or simply dropped from the summary — real
+  coverage is overstated.
+- Defects closed as "won't fix"/"can't reproduce" but remaining real risks —
+  not reflected in known issues.
+- Code coverage given as an overall repository number (high thanks to old code),
+  while on the release's new code it's low — the metric misleads.
+- An open Critical/High in the perimeter, but the verdict is "ready" — the
+  verdict doesn't follow from the data.
+- Numbers taken "by eye" without a link to a run/ticket — the report can't be
+  re-verified.
+- Non-functional directions (perf/security/a11y) silently skipped, though the
+  release touches them.
+- Flaky failures counted as real defects (or vice versa, real bugs written off
+  as flaky) — it distorts both the metrics and the verdict.
+- A "release" report, but the set of included tickets isn't reconciled with the
+  commit range — part of the changes isn't reflected.
+- The executive summary is written in techjargon — stakeholders don't read the
+  decision.
+- Metrics computed from incomplete data and presented as precise — defect
+  density is "low" because half the area wasn't tested.
 
-## КРИТЕРИИ КАЧЕСТВЕННОГО ОТЧЁТА (DoD)
+## GOOD-REPORT CRITERIA (DoD)
 
-- Есть executive summary с вердиктом одной фразой в начале.
-- Есть раздел «что НЕ тестировалось».
-- Каждая цифра сопровождена источником (прогон/тикет/отчёт).
-- Дефекты разбиты по severity и статусу; блокеры выделены.
-- Есть оценка остаточных рисков и known issues.
-- Вердикт следует из данных и не противоречит release-readiness (если был).
-- Пробелы в данных помечены явно, а не заполнены выдумкой.
-- Верх — для менеджмента, детали — в приложениях.
+- There's an executive summary with a one-sentence verdict at the start.
+- There's a "what was NOT tested" section.
+- Every number is accompanied by a source (run/ticket/report).
+- Defects are broken down by severity and status; blockers are highlighted.
+- There's an assessment of residual risks and known issues.
+- The verdict follows from the data and doesn't contradict release-readiness (if
+  there was one).
+- Data gaps are flagged explicitly, not filled with invention.
+- The top is for management, the details are in the appendices.
 
-## ФОРМАТ РЕЗУЛЬТАТА
+## OUTPUT FORMAT
 
-Сохрани отчёт в `docs/qa/reports/<cycle-or-release>.md` (slug — по версии/циклу;
-следуй существующей структуре репозитория, если она есть, иначе создай
-`docs/qa/reports/`). Продублируй executive summary и вердикт в чат. Документ
-строй по разделам 1–9 выше, с вердиктом одной фразой в самом начале.
+Save the report to `docs/qa/reports/<cycle-or-release>.md` (slug — by
+version/cycle; follow the existing repository structure if there is one,
+otherwise create `docs/qa/reports/`). Echo the executive summary and verdict to
+chat. Build the document by sections 1–9 above, with a one-sentence verdict at
+the very start.
 
-## ПРАВИЛА ОФОРМЛЕНИЯ
+## FORMATTING RULES
 
-- Перед началом проверь, нет ли уже отчёта по этому циклу/релизу в
-  `docs/qa/reports/` — если есть, обнови его (новые прогоны, изменившиеся
-  статусы дефектов), а не создавай дубликат.
-- Дефекты указывай стабильными ID из трекера (со ссылкой), не переприсваивай
-  свои.
-- Не копируй чужие отчёты дословно — ссылайся на них как на приложения и своди
-  их выводы.
+- Before starting, check whether a report on this cycle/release already exists in
+  `docs/qa/reports/` — if so, update it (new runs, changed defect statuses)
+  rather than creating a duplicate.
+- Reference defects by stable IDs from the tracker (with a link), don't
+  reassign your own.
+- Don't copy other reports verbatim — reference them as appendices and fold in
+  their conclusions.
 
-## ЗАПУСК (практическая инструкция)
+## RUNNING IT (practical instructions)
 
-1. Сначала САМ определи SCOPE отчётности (релиз/цикл/фича) — этот шаг зависит от
-   контекста диалога, не делегируй.
-2. Определи CI/трекер/структуру `docs/qa` проекта; собери доступные данные:
-   прогоны тестов, фильтры дефектов, существующие отчёты аудитов и
+1. First, YOURSELF determine the reporting SCOPE (release/cycle/feature) — this
+   step depends on the dialog context, don't delegate it.
+2. Determine the project's CI/tracker/`docs/qa` structure; gather the available
+   data: test runs, defect filters, existing audit reports and
    release-readiness.
-3. Где можешь дёшево добрать данные — сделай это (запусти доступные тесты и
-   приложи вывод; запроси фильтр трекера). Где нужна глубокая проверка, которой
-   не было, — не проводи её здесь, а зафиксируй как непокрытое.
-4. Если объём большой и доступен Agent tool — делегируй сбор по областям
-   (например, отдельный субагент собирает статус нефункциональных проверок из
-   `docs/qa`/`docs/bugs`), передав ему конкретные пути; субагент не видит этот
-   файл.
-5. Собери документ по разделам, выведи вердикт одной фразой, честно пометь
-   пробелы, сохрани отчёт и продублируй summary в чат.
+3. Where you can gather data cheaply — do it (run the available tests and attach
+   the output; request a tracker filter). Where a deep check is needed and
+   wasn't done — don't perform it here, but record it as not covered.
+4. If the volume is large and the Agent tool is available — delegate gathering by
+   area (for example, a separate subagent gathers the status of non-functional
+   checks from `docs/qa`/`docs/bugs`), passing it concrete paths; the subagent
+   does not see this file.
+5. Assemble the document by section, state the verdict in one sentence, honestly
+   flag the gaps, save the report, and echo the summary to chat.
 
-Это отчётность, а не имплементация и не само тестирование: инструменты
-редактирования кода недоступны намеренно. Ты фиксируешь и подаёшь результаты
-тестирования и даёшь рекомендацию; исправления и повторные прогоны — за
-командой.
+This is reporting, not implementation or the testing itself: code-editing tools
+are unavailable by design. You record and present the testing results and give a
+recommendation; the fixes and re-runs are the team's job.
+

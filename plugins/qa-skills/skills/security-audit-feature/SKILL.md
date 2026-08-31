@@ -1,434 +1,444 @@
 ---
 name: security-audit-feature
-description: Точечный аудит безопасности ОДНОЙ конкретной фичи/изменения в the-platform (не всего репозитория) — периметр из директории/ветки/diff, документа-спецификации/PRD или YouTrack issue; та же дисциплина проверки, что и у полного аудита (адверсариальная верификация, три независимых среза, чек-лист по 14 категориям — auth/authz, мультитенантность, websocket, internal API, инъекции, SSRF, XSS, секреты/PII, файлы, зависимости, docker, k8s/helm, обработка ошибок, CI/CD), с привязкой находок к file:line и явным вердиктом готовности к релизу. Используй когда просят проверить безопасность конкретной фичи, ветки, PR или YouTrack-задачи перед мержем/релизом, найти уязвимости в новом эндпоинте/интеграции/загрузке файлов/вебхуке, оценить не открывает ли новая функциональность доступ к чужим данным или чужой компании — даже без слова "аудит", например "не течёт ли эта фича между компаниями", "можно ли эту фичу мержить с точки зрения безопасности", "проверь эту ветку на security-дыры". Это НЕ то же самое, что скилл `security-review` (тот делает быстрое ревью pending-изменений на текущей ветке в стиле обычного code review, без требования по SCOPE/YouTrack/трём срезам, без чек-листа категорий и без формата аудиторского отчёта) — если нужна полноценная security-проверка с этой методологией, используй этот скилл, а не `security-review`. Для аудита всего репозитория целиком используй `security-audit-full`, а не этот.
-argument-hint: "[путь к директории/фиче, путь к документу-спецификации, или YouTrack issue ID/ссылка]"
+description: Focused security audit of ONE specific feature/change in the-platform (not the whole repository) — scope taken from a directory/branch/diff, a spec/PRD document, or a YouTrack issue; the same verification discipline as the full audit (adversarial verification, three independent passes, a 14-category checklist — auth/authz, multi-tenancy, websocket, internal API, injections, SSRF, XSS, secrets/PII, files, dependencies, docker, k8s/helm, error handling, CI/CD), with findings tied to file:line and an explicit release-readiness verdict. Use when asked to check the security of a specific feature, branch, PR, or YouTrack task before merge/release, to find vulnerabilities in a new endpoint/integration/file upload/webhook, or to assess whether new functionality opens access to someone else's data or another company — even without the word "audit", e.g. "is this feature leaking between companies", "is this feature OK to merge security-wise", "check this branch for security holes". This is NOT the same as the `security-review` skill (which does a quick review of pending changes on the current branch in ordinary code-review style, with no SCOPE/YouTrack/three-pass requirement, no category checklist, and no audit-report format) — if you need a full security check with this methodology, use this skill, not `security-review`. To audit the entire repository, use `security-audit-full`, not this one.
+argument-hint: "[path to a directory/feature, path to a spec document, or a YouTrack issue ID/link]"
 disallowed-tools: Edit
 ---
 
-# Аудит безопасности отдельной фичи (feature-scoped security review)
+# Feature-scoped security review (single-feature security audit)
 
-Для проекта the-platform: микросервисная CRM-платформа, обрабатывающая
-персональные данные клиентов. Безопасность — критический приоритет, а не
-формальность. Аудит должен находить реальные, эксплуатируемые проблемы с
-привязкой к file:line, а не составлять общий чек-лист без проверки. Каждая
-находка обязана быть подтверждена вручную, а не только упоминанием в выводе
-сканера.
+For the-platform project: a microservices CRM platform that processes
+customer personal data. Security is a critical priority, not a formality.
+The audit must find real, exploitable problems tied to file:line, not
+produce a generic checklist without verification. Every finding must be
+confirmed by hand, not merely mentioned in a scanner's output.
 
-Это точечная версия полного аудита репозитория (см. скилл
-`security-audit-full`, если задача — весь репозиторий, а не одна фича).
-Принципы верификации те же, но периметр, находки и отчёт строго ограничены
-кодом, который относится к этой фиче и к тому, что она затрагивает. Логику
-ручного разбора можно делегировать через Agent tool — используй
-параллелизацию по зонам, как описано в разделе "Запуск проверки" ниже.
+This is the focused version of the full repository audit (see the
+`security-audit-full` skill if the task is the whole repository rather than
+a single feature). The verification principles are the same, but the scope,
+findings, and report are strictly limited to the code that belongs to this
+feature and to what it touches. The manual-analysis work can be delegated
+through the Agent tool — use parallelization by zone as described in the
+"Running the check" section below.
 
-## ВХОДНЫЕ ДАННЫЕ: КАК ОПРЕДЕЛИТЬ ФИЧУ
+## INPUT: HOW TO DETERMINE THE FEATURE
 
-Фича: `$ARGUMENTS`
+Feature: `$ARGUMENTS`
 
-Фича передаётся в одном из трёх видов — определи, какой перед тобой, и
-построй периметр проверки соответствующим способом. Периметр ВСЕГДА шире,
-чем буквально указанный вход: включай прямых потребителей/вызывающий код
-(роутер, который регистрирует хендлер; фронтенд, который дёргает API;
-смежный сервис, которому уходит межсервисный вызов).
+The feature is passed in one of three forms — figure out which one you have
+and build the review scope accordingly. The scope is ALWAYS wider than the
+literal input: include direct consumers/calling code (the router that
+registers the handler; the frontend that hits the API; the neighboring
+service that receives the inter-service call).
 
-**A. ДИРЕКТОРИЯ/ВЕТКА/DIFF** (например `services/xxx-service/feature_y/`
-или "diff между dev и веткой feature/PROJ-XXXX"):
-- Периметр = всё содержимое директории (или файлы из `git diff --stat`
-  относительно базовой ветки) + модули, которые её импортируют (`grep -r`
-  по имени пакета/модуля за пределами директории) + роуты/DI, которые её
-  регистрируют (main.py/app factory/router include).
-- Если директория — общая библиотека (libs/shared_auth, libs/shared_metrics
-  и т.п.), обязательно определи ВСЕХ потребителей библиотеки по всем
-  сервисам — уязвимость в общем коде размножается на весь список
-  потребителей.
+**A. DIRECTORY/BRANCH/DIFF** (e.g. `services/xxx-service/feature_y/` or
+"diff between dev and the feature/PROJ-XXXX branch"):
+- Scope = the entire contents of the directory (or the files from
+  `git diff --stat` against the base branch) + modules that import it
+  (`grep -r` on the package/module name outside the directory) + the
+  routes/DI that register it (main.py/app factory/router include).
+- If the directory is a shared library (libs/shared_auth,
+  libs/shared_metrics, etc.), be sure to identify ALL consumers of the
+  library across all services — a vulnerability in shared code multiplies
+  across the whole list of consumers.
 
-**B. ДОКУМЕНТ** (путь к спецификации/дизайн-документу/PRD, .md/.txt/.docx):
-- Прочитай документ целиком. Извлеки из него: имена эндпоинтов/маршрутов,
-  названия моделей/таблиц, роли и права, названия UI-компонентов/экранов,
-  упомянутые внешние интеграции (вебхуки, callback URL, сторонние API).
-- По каждому извлечённому термину сделай `grep`/поиск по кодовой базе, чтобы
-  перевести описание "что должно быть" в конкретные file:line "что есть на
-  самом деле". Не ограничивайся тем, что документ говорит "реализовано" —
-  проверяй код, а не текст документа.
-- Если документ описывает намерение, а не факт (черновик ТЗ) — явно пометь
-  в отчёте, какие пункты не нашли соответствия в коде (это тоже находка:
-  несоответствие спеки и реализации может означать недоделанный контроль
-  доступа).
+**B. DOCUMENT** (path to a spec/design document/PRD, .md/.txt/.docx):
+- Read the document in full. Extract from it: endpoint/route names,
+  model/table names, roles and permissions, UI component/screen names, and
+  any mentioned external integrations (webhooks, callback URLs, third-party
+  APIs).
+- For each extracted term, `grep`/search the codebase to translate the
+  "what should exist" description into concrete file:line "what actually
+  exists". Do not settle for the document saying something is "implemented"
+  — verify the code, not the document text.
+- If the document describes intent rather than fact (a draft spec), flag
+  explicitly in the report which items have no counterpart in the code
+  (this is a finding too: a mismatch between spec and implementation may
+  mean an unfinished access control).
 
-**C. YOUTRACK ISSUE** (ID вида `PROJ-XXXX` или ссылка):
-- Получи текст issue (заголовок, описание, комментарии, acceptance criteria)
-  через доступный в проекте механизм интеграции с трекером (MCP-инструмент
-  YouTrack/Jira/GitHub/Linear, если подключён).
-  Если программного доступа нет — прямо запроси у пользователя текст issue и
-  ссылки на связанные PR, не додумывай содержание.
-- Найди связанные коммиты и файлы по ID тикета: коммиты в этом репозитории
-  принято помечать номером тикета в сообщении (например `PROJ-1042`,
-  `PROJ-1031`, `PROJ-318`) — используй `git log --all --grep=<ISSUE-ID>
-  --oneline`, затем `git show --stat <hash>` / `git log --all -- <файлы из
-  commit>`, чтобы построить список затронутых файлов и сервисов.
-- Если тикет ссылается на PR/ветку — проверь именно diff этой ветки
-  (`git diff main...<branch>`), а не только финальное состояние main, чтобы
-  не пропустить промежуточные версии, если ветка ещё не смержена.
+**C. YOUTRACK ISSUE** (an ID of the form `PROJ-XXXX` or a link):
+- Fetch the issue text (title, description, comments, acceptance criteria)
+  through whatever tracker-integration mechanism the project provides (a
+  YouTrack/Jira/GitHub/Linear MCP tool, if connected). If no programmatic
+  access exists, ask the user directly for the issue text and links to
+  related PRs — do not invent the content.
+- Find related commits and files by ticket ID: commits in this repository
+  are conventionally tagged with the ticket number in the message (e.g.
+  `PROJ-1042`, `PROJ-1031`, `PROJ-318`) — use `git log --all
+  --grep=<ISSUE-ID> --oneline`, then `git show --stat <hash>` / `git log
+  --all -- <files from commit>` to build the list of affected files and
+  services.
+- If the ticket references a PR/branch, review that branch's diff
+  specifically (`git diff main...<branch>`), not just the final state of
+  main, so you do not miss intermediate versions if the branch is not yet
+  merged.
 
-Если ни один из трёх источников не даёт однозначно определить периметр —
-остановись и явно перечисли, что нужно уточнить у автора задачи, вместо того
-чтобы проверять наугад весь сервис целиком.
+If none of the three sources determines the scope unambiguously, stop and
+explicitly list what needs to be clarified with the task author, rather than
+blindly reviewing the entire service.
 
-Явно зафиксируй в начале отчёта итоговый периметр (список
-file/директорий/сервисов), который получился после этого шага — это твой
-рабочий SCOPE, дальше весь аудит идёт по нему, плюс точки соприкосновения с
-остальной системой (см. СРЕЗ 3 ниже).
+Explicitly record at the top of the report the final scope (the list of
+files/directories/services) that resulted from this step — this is your
+working SCOPE, and the rest of the audit runs on it, plus the points of
+contact with the rest of the system (see PASS 3 below).
 
-## КЛЮЧЕВОЙ ПРИНЦИП: ВЕРИФИКАЦИЯ, А НЕ ДОВЕРИЕ
+## KEY PRINCIPLE: VERIFICATION, NOT TRUST
 
-Причина, по которой проверки фич проваливаются, — принятие на веру того, что
-"код написан по ТЗ" эквивалентно "фича безопасна". Это НЕ так. Проверяй
-адверсариально:
+The reason feature checks fail is taking it on faith that "the code was
+written to spec" is equivalent to "the feature is secure". It is NOT.
+Verify adversarially:
 
-1. Если фича добавляет проверку (флаг, HMAC-подпись, экранирование,
-   авторизация) — убедись, что она ВКЛЮЧЕНА по умолчанию и активна во всех
-   окружениях (dev/staging/prod), а не только реализована в коде и
-   выключена флагом.
-2. Если фича добавляет экранирование ввода — проверь ПОЛНОТУ (одиночная
-   кавычка, двойная кавычка, обратный слэш, null-байт, юникод-обход), а не
-   только очевидный случай.
-3. Если фича защищает один эндпоинт/сервис — проверь, нет ли у неё "братьев
-   и сестёр" того же класса операций в другом месте кодовой базы, которые
-   остались незащищёнными (например, фича добавила auth на POST, но не на
-   DELETE того же ресурса, или на аналогичный bulk-эндпоинт).
-4. Если в фиче есть RBAC/switch/if-else по ролям — проверь ветку "иначе"
-   (default case). Отсутствие явного отказа в доступе по умолчанию — это
-   дыра.
-5. Не принимай описание в тикете/ТЗ ("это уже защищено", "тут используется
-   общий middleware") без самостоятельной проверки текущего кода.
-6. Формулируй статус явно: "не реализовано" / "реализовано формально (код
-   есть, защиты нет)" / "реализовано выборочно (часть класса покрыта)" /
-   "реализовано полностью" / "новая находка вне рамок задачи фичи".
+1. If the feature adds a check (a flag, an HMAC signature, escaping,
+   authorization), make sure it is ENABLED by default and active in all
+   environments (dev/staging/prod), not merely implemented in code and
+   turned off by a flag.
+2. If the feature adds input escaping, verify COMPLETENESS (single quote,
+   double quote, backslash, null byte, unicode bypass), not just the
+   obvious case.
+3. If the feature protects one endpoint/service, check whether it has
+   "siblings" of the same class of operation elsewhere in the codebase that
+   were left unprotected (e.g. the feature added auth on POST but not on
+   DELETE of the same resource, or on an analogous bulk endpoint).
+4. If the feature has RBAC/switch/if-else on roles, check the "else" branch
+   (default case). The absence of an explicit access denial by default is a
+   hole.
+5. Do not accept the ticket/spec description ("this is already protected",
+   "it uses the shared middleware here") without independently verifying the
+   current code.
+6. State the status explicitly: "not implemented" / "implemented on paper
+   (code exists, no protection)" / "implemented selectively (part of the
+   class covered)" / "fully implemented" / "new finding outside the
+   feature's scope".
 
-## МЕТОДОЛОГИЯ: ТРИ НЕЗАВИСИМЫХ СРЕЗА (в границах SCOPE фичи)
+## METHODOLOGY: THREE INDEPENDENT PASSES (within the feature SCOPE)
 
-### СРЕЗ 1 — Точечное автоматизированное сканирование
+### PASS 1 — Focused automated scanning
 
-- Если фича добавила новые зависимости (новая запись в
-  requirements/pyproject/package.json) — прогони pip-audit/npm audit
-  точечно по изменившемуся lock-файлу, а не по всему репозиторию.
-- semgrep/bandit по файлам из SCOPE (injection, ssrf, insecure
+- If the feature added new dependencies (a new entry in
+  requirements/pyproject/package.json), run pip-audit/npm audit focused on
+  the changed lock file, not on the whole repository.
+- semgrep/bandit on the files in SCOPE (injection, ssrf, insecure
   deserialization, hardcoded secrets, weak crypto).
-- Если фича трогает Dockerfile/helm-values/k8s-манифесты — checkov/
-  kube-linter точечно по изменённым файлам.
-- gitleaks/trufflehog по diff'у фичи (`git diff`/`git log -p` на затронутых
-  файлах и коммитах) — секрет мог быть закоммичен и затем удалён в рамках
-  той же ветки.
+- If the feature touches Dockerfile/helm-values/k8s manifests, run checkov/
+  kube-linter focused on the changed files.
+- gitleaks/trufflehog on the feature's diff (`git diff`/`git log -p` on the
+  affected files and commits) — a secret may have been committed and then
+  deleted within the same branch.
 
-### СРЕЗ 2 — Ручной построчный разбор кода фичи
+### PASS 2 — Manual line-by-line review of the feature code
 
-Разбери построчно (не по диагонали) каждый файл из SCOPE, применяя чек-лист
-по категориям ниже — только те категории, которые реально применимы к тому,
-что делает фича (см. подсказки применимости перед чек-листом). Для каждой
-находки: file:line, тип уязвимости, конкретный сценарий эксплуатации
-("запрос X с параметром Y даёт результат Z"), severity, статус.
+Review every file in SCOPE line by line (not diagonally), applying the
+category checklist below — only those categories that actually apply to what
+the feature does (see the applicability hints before the checklist). For
+each finding: file:line, vulnerability type, a concrete exploitation
+scenario ("request X with parameter Y yields result Z"), severity, status.
 
-Если SCOPE большой (несколько сервисов/директорий) и доступен Agent tool —
-раздели на независимые зоны и используй несколько субагентов, каждому —
-своя зона, чтобы не срезать угол по всему объёму разом (см. "Запуск
-проверки" ниже).
+If the SCOPE is large (several services/directories) and the Agent tool is
+available, split it into independent zones and use several subagents, one
+zone each, so you don't cut corners across the whole volume at once (see
+"Running the check" below).
 
-### СРЕЗ 3 — Точки соприкосновения с остальной системой
+### PASS 3 — Points of contact with the rest of the system
 
-Независимо от построчного разбора ответь: как фича встраивается в
-существующие security-инварианты платформы, а не только "нет ли дыр в её
-собственном коде"?
+Independently of the line-by-line review, answer: how does the feature fit
+into the platform's existing security invariants, not just "are there holes
+in its own code"?
 
-- Использует ли фича существующие механизмы аутентификации/авторизации/
-  мультитенантности, или изобретает собственный путь в обход них (новый
-  хендлер, который не проходит через общий auth-middleware/RBAC-декоратор)?
-- Если фича добавляет новый internal-эндпоинт между сервисами — защищён ли
-  он тем же shared-secret/mTLS механизмом, что и остальной класс
-  `/internal/*` эндпоинтов, или это исключение?
-- Если фича добавляет новую точку чтения/записи данных — фильтруется ли она
-  по company_id/tenant_id так же, как остальные точки того же типа в
-  системе?
-- Если фича переиспользует общую библиотеку (libs/shared_auth и т.п.) —
-  использует ли актуальную версию как единый пакет, или скопировала/
-  форкнула логику себе?
-- Ломает ли фича какой-то из существующих security-инвариантов, описанных в
-  предыдущих аудитах репозитория. В проекте это не абстрактная оговорка —
-  реестр прошлых находок лежит в `docs/bugs/security_audit/` (по каждой
-  находке прошлого аудита зафиксирован вердикт: подтвердилась / false
-  positive / уже исправлена), а регрессионная проверка по нему —
-  `scripts/verify_audit_fixes.py`. Если SCOPE фичи пересекается по теме или
-  файлам с одной из находок в этой папке — обязательно прогони скрипт (если
-  он есть в репозитории) и явно сверь текущий статус, а не переоткрывай
-  находку с нуля.
-- Если находка по фиче фактически совпадает с уже трекнутым в
-  `docs/bugs/security_audit/` риском, который был осознанно принят (низкая
-  реплика для HA, отключённый networkPolicy и т.п.) — сошлись на
-  существующий файл-находку вместо того, чтобы заводить дубликат как "новую
-  находку фичи"; отметь только если фича делает риск хуже, чем он был
-  зафиксирован.
+- Does the feature use the existing authentication/authorization/multi-
+  tenancy mechanisms, or does it invent its own path that bypasses them (a
+  new handler that does not go through the shared auth middleware/RBAC
+  decorator)?
+- If the feature adds a new internal endpoint between services, is it
+  protected by the same shared-secret/mTLS mechanism as the rest of the
+  `/internal/*` endpoint class, or is it an exception?
+- If the feature adds a new data read/write point, is it filtered by
+  company_id/tenant_id the same way as the other points of the same type in
+  the system?
+- If the feature reuses a shared library (libs/shared_auth, etc.), does it
+  use the current version as a single package, or did it copy/fork the logic
+  into itself?
+- Does the feature break any of the existing security invariants documented
+  in previous repository audits? In this project that is not an abstract
+  caveat — the registry of past findings lives in
+  `docs/bugs/security_audit/` (each past-audit finding records a verdict:
+  confirmed / false positive / already fixed), and the regression check over
+  it is `scripts/verify_audit_fixes.py`. If the feature SCOPE overlaps by
+  topic or by files with one of the findings in that folder, be sure to run
+  the script (if present in the repository) and explicitly reconcile the
+  current status, rather than reopening the finding from scratch.
+- If a feature finding effectively coincides with a risk already tracked in
+  `docs/bugs/security_audit/` that was deliberately accepted (a low replica
+  count for HA, a disabled networkPolicy, etc.), reference the existing
+  finding file instead of raising a duplicate as a "new feature finding";
+  note it only if the feature makes the risk worse than it was recorded.
 
-## ЧЕК-ЛИСТ ПО КАТЕГОРИЯМ (применяй те, что релевантны фиче)
+## CATEGORY CHECKLIST (apply the ones relevant to the feature)
 
-Перед разбором быстро классифицируй фичу: какие из блоков ниже применимы
-(новый API-эндпоинт → блоки 1,2,5,6,10; новый UI-экран → блоки 1,7; загрузка
-файлов → блок 9; интеграция/вебхук → блоки 4,6,8; инфраструктурное изменение
-→ блоки 11,12). Не пропускай блок только потому что "фича маленькая" —
-маленькие фичи типично и есть источник точечных дыр (см. "Edge cases" ниже).
+Before the review, quickly classify the feature: which of the blocks below
+apply (a new API endpoint → blocks 1,2,5,6,10; a new UI screen → blocks 1,7;
+file upload → block 9; integration/webhook → blocks 4,6,8; infrastructure
+change → blocks 11,12). Do not skip a block just because "the feature is
+small" — small features are typically exactly the source of pinpoint holes
+(see "Edge cases" below).
 
-1. **Аутентификация и авторизация**
-   - Требует ли новый/изменённый эндпоинт аутентификации так же, как
-     остальные эндпоинты того же сервиса (нет ли "забытого" открытого
-     маршрута)?
-   - RBAC-ветки: что происходит для роли, не попавшей ни в одну явную ветку
-     (default/else)? Приводит ли это к утечке (нет фильтра по
+1. **Authentication and authorization**
+   - Does the new/changed endpoint require authentication the same way as
+     the other endpoints of the same service (is there a "forgotten" open
+     route)?
+   - RBAC branches: what happens for a role that falls into no explicit
+     branch (default/else)? Does this lead to a leak (no filter by
      assigned_user_id/owner_id)?
-   - IDOR/BOLA: можно ли, меняя ID в URL/body, получить доступ к чужому
-     объекту, которым оперирует фича?
-   - Broken function level authorization: доступна ли новая
-     административная/массовая операция без проверки роли?
-   - Mass assignment/over-posting: принимает ли новый/изменённый API
-     произвольные поля тела запроса (role, is_admin, company_id, balance и
-     т.п.), или список разрешённых полей — explicit whitelist?
-   - Session/token: если фича трогает сессии/токены — где хранение, есть ли
-     инвалидация, ограничение времени жизни?
-   - Rate limiting: если фича добавляет login/сброс пароля/OTP-подобный
-     поток — есть ли лимит попыток?
+   - IDOR/BOLA: can you access someone else's object that the feature
+     operates on by changing an ID in the URL/body?
+   - Broken function level authorization: is the new administrative/bulk
+     operation accessible without a role check?
+   - Mass assignment/over-posting: does the new/changed API accept arbitrary
+     request-body fields (role, is_admin, company_id, balance, etc.), or is
+     the list of allowed fields an explicit whitelist?
+   - Session/token: if the feature touches sessions/tokens — where is the
+     storage, is there invalidation, is there a lifetime limit?
+   - Rate limiting: if the feature adds a login/password reset/OTP-like flow
+     — is there a limit on attempts?
 
-2. **Мультитенантность (изоляция между компаниями-клиентами)** — разбирай
-   отдельно от общего IDOR, межтенантная утечка тяжелее по последствиям.
-   - Каждая новая точка чтения/записи (REST-хендлер, WS-подписка, кэш-ключ,
-     поисковый индекс, очередь, экспорт) — фильтруется ли по
-     company_id/tenant_id на уровне запроса к БД, а не только на уровне
-     UI/роутера?
-   - Совпадение company_id проверяется явным сравнением значения из
-     токена/контекста с company_id записи, а не подразумевается?
-   - Общие ресурсы (Redis-ключи, RabbitMQ-очереди, файловое хранилище) — не
-     коллизирует ли ключ/имя между компаниями при одинаковых внутренних ID?
-   - Новая Alembic-миграция/DDL: у новой таблицы/колонки, которая хранит
-     данные конкретной компании, есть ли `company_id`/`tenant_id` и индекс
-     по нему — структурный пробел на уровне схемы не поймать построчным
-     разбором запросов, если сам столбец отсутствует.
+2. **Multi-tenancy (isolation between customer companies)** — review this
+   separately from generic IDOR; a cross-tenant leak is heavier in
+   consequences.
+   - Every new read/write point (REST handler, WS subscription, cache key,
+     search index, queue, export) — is it filtered by company_id/tenant_id
+     at the DB-query level, not just at the UI/router level?
+   - Is the company_id match checked by an explicit comparison of the value
+     from the token/context against the record's company_id, rather than
+     assumed?
+   - Shared resources (Redis keys, RabbitMQ queues, file storage) — can a
+     key/name collide between companies given identical internal IDs?
+   - A new Alembic migration/DDL: does a new table/column that stores a
+     specific company's data have `company_id`/`tenant_id` and an index on
+     it — a structural gap at the schema level cannot be caught by a
+     line-by-line query review if the column itself is missing.
 
-3. **WebSocket / realtime** (если фича трогает realtime-канал)
-   - Проверяется ли токен/роль/company_id при connect И отдельно при каждой
-     подписке на канал/комнату (join)?
-   - Может ли клиент подписаться на чужой канал, подставив/угадав
-     room-id/dialog-id/user-id?
-   - Broadcast фильтруется по company_id/роли перед отправкой, или сервер
-     полагается на то, что клиент "просто не подписан"?
+3. **WebSocket / realtime** (if the feature touches a realtime channel)
+   - Is the token/role/company_id checked at connect AND separately at each
+     channel/room subscription (join)?
+   - Can a client subscribe to someone else's channel by supplying/guessing
+     a room-id/dialog-id/user-id?
+   - Is broadcast filtered by company_id/role before sending, or does the
+     server rely on the client "just not being subscribed"?
 
-4. **Internal-API между сервисами** (если фича добавляет/меняет
+4. **Internal-API between services** (if the feature adds/changes
    `/internal/*`)
-   - Требует ли shared-secret/mTLS так же, как остальные эндпоинты того же
-     класса операций в других сервисах? Проверяется ли секрет фактически (а
-     не только объявлен в env)?
-   - Может ли новый internal-эндпоинт быть вызван напрямую снаружи
-     кластера?
+   - Does it require a shared-secret/mTLS the same way as the other
+     endpoints of the same class of operation in other services? Is the
+     secret actually verified (not merely declared in env)?
+   - Can the new internal endpoint be called directly from outside the
+     cluster?
 
-5. **Инъекции (SQL / NoSQL / Command / Template / Deserialization)**
-   - Сборка запросов конкатенацией/f-string/format вместо параметризованных
-     запросов/ORM — особенно в новых query-параметрах (фильтры, поиск,
-     сортировка).
-   - Экранирование "вручную" — проверь полноту (обратный слэш, юникод,
-     вложенные кавычки).
-   - Command injection: новые subprocess/os.system/exec с пользовательским
-     вводом.
-   - Небезопасная десериализация новых данных из очереди/вебхука/
-     межсервисного вызова (pickle, yaml.load без SafeLoader, eval/exec).
+5. **Injections (SQL / NoSQL / Command / Template / Deserialization)**
+   - Building queries by concatenation/f-string/format instead of
+     parameterized queries/ORM — especially in new query parameters
+     (filters, search, sorting).
+   - "Manual" escaping — verify completeness (backslash, unicode, nested
+     quotes).
+   - Command injection: new subprocess/os.system/exec with user input.
+   - Insecure deserialization of new data from a queue/webhook/inter-service
+     call (pickle, yaml.load without SafeLoader, eval/exec).
 
-6. **SSRF** (если фича делает исходящий HTTP-запрос по внешнему URL)
-   - Есть ли allow-list доменов, блокировка приватных/internal
-     IP-диапазонов (169.254.x.x, 10.x, 172.16-31.x, 192.168.x, 127.x, cloud
-     metadata)?
-   - Проверяется ли подпись/источник вебхука перед тем, как система
-     инициирует ответный запрос по URL из его тела?
+6. **SSRF** (if the feature makes an outbound HTTP request to an external
+   URL)
+   - Is there a domain allow-list, blocking of private/internal IP ranges
+     (169.254.x.x, 10.x, 172.16-31.x, 192.168.x, 127.x, cloud metadata)?
+   - Is the webhook's signature/origin verified before the system initiates
+     a response request to a URL from its body?
 
-7. **XSS** (включая клиентские виджеты, если фича — frontend/встраиваемый
-   компонент)
-   - innerHTML/dangerouslySetInnerHTML/document.write с недоверенными
-     данными.
-   - Если фича — встраиваемый на сторонних сайтах виджет: уязвимость видна
-     конечным пользователям клиентов вашей платформы — квалифицируй severity
-     с учётом расширенного радиуса поражения.
-   - CSP/clickjacking-заголовки не ослаблены ли новым кодом.
+7. **XSS** (including client-side widgets, if the feature is a
+   frontend/embeddable component)
+   - innerHTML/dangerouslySetInnerHTML/document.write with untrusted data.
+   - If the feature is a widget embedded on third-party sites: the
+     vulnerability is visible to the end users of your platform's customers —
+     qualify severity accounting for the expanded blast radius.
+   - Are CSP/clickjacking headers not weakened by the new code?
 
-8. **Работа с секретами и PII** (если фича трогает интеграции/токены/PII)
-   - Новые секреты в коде/конфигах, отслеживаемых git.
-   - Токены новых интеграций в БД — открытым текстом или зашифрованы?
-   - Маскирование секретов в новых логах — работает ли для новых типов
-     данных, которые ввела фича?
+8. **Secrets and PII handling** (if the feature touches
+   integrations/tokens/PII)
+   - New secrets in code/configs tracked by git.
+   - New integration tokens in the DB — plaintext or encrypted?
+   - Secret masking in new logs — does it work for the new data types the
+     feature introduced?
 
-9. **Загрузка и хранение файлов** (если фича добавляет upload/скачивание)
-   - Проверка MIME-типа/расширения (не доверять Content-Type от клиента).
-   - Ограничение размера, защита от zip-бомб.
-   - Path traversal при формировании пути из пользовательского ввода.
-   - Публичная раздача — требует ли аутентификации, если файлы содержат
+9. **File upload and storage** (if the feature adds upload/download)
+   - MIME-type/extension validation (do not trust the client's
+     Content-Type).
+   - Size limits, protection against zip bombs.
+   - Path traversal when building a path from user input.
+   - Public serving — does it require authentication if the files contain
      PII?
 
-10. **Зависимости и суплай-чейн** (если фича добавила новые пакеты)
-    - Критичность новых зависимостей, есть ли более безопасная
-      альтернатива.
-    - Новый внутренний пакет — устанавливается из приватного индекса/
-      локального пути, или по голому имени, которое можно подменить с
-      публичного PyPI/npm (dependency confusion)?
+10. **Dependencies and supply chain** (if the feature added new packages)
+    - Criticality of new dependencies, whether a safer alternative exists.
+    - A new internal package — installed from a private index/local path, or
+      by a bare name that can be substituted from public PyPI/npm (dependency
+      confusion)?
 
-11. **Docker / контейнеры** (если фича меняет Dockerfile)
-    - USER указан (non-root)? Секреты не через ARG/ENV?
+11. **Docker / containers** (if the feature changes the Dockerfile)
+    - Is USER set (non-root)? Are secrets not passed via ARG/ENV?
 
-12. **Kubernetes / Helm** (если фича меняет values/манифесты)
-    - networkPolicy/securityContext/resources не ослаблены ли новым
-      values-файлом относительно существующего baseline проекта?
-    - Секреты через Kubernetes Secrets, а не открытым текстом в
-      values.yaml?
+12. **Kubernetes / Helm** (if the feature changes values/manifests)
+    - Are networkPolicy/securityContext/resources not weakened by the new
+      values file relative to the project's existing baseline?
+    - Secrets via Kubernetes Secrets, not plaintext in values.yaml?
 
-13. **Обработка ошибок и наблюдаемость**
-    - Новый broad except с логированием и возвратом None/пустого результата
-      без re-raise — не маскирует ли это отказ проверки авторизации как
-      "разрешено"?
-    - Логируются ли новые security-события (неудачные авторизации,
-      изменения ролей) отдельно?
-    - Утечка внутренней информации через новые сообщения об ошибках наружу.
+13. **Error handling and observability**
+    - A new broad except that logs and returns None/an empty result without
+      re-raise — does this mask a failed authorization check as "allowed"?
+    - Are new security events (failed authorizations, role changes) logged
+      separately?
+    - Leakage of internal information through new error messages to the
+      outside.
 
-14. **CI/CD** (если фича меняет пайплайн)
-    - CI script injection: интерполируется ли непроверенный внешний ввод
-      (заголовок PR, имя ветки) напрямую в шаг `run:`?
-    - Новый security-гейт реально блокирует мерж, или только печатает
-      предупреждение?
+14. **CI/CD** (if the feature changes the pipeline)
+    - CI script injection: is unvalidated external input (PR title, branch
+      name) interpolated directly into a `run:` step?
+    - Does the new security gate actually block the merge, or does it only
+      print a warning?
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ ПРИ ТЕСТИРОВАНИИ ФИЧИ
+## EDGE CASES OFTEN MISSED WHEN TESTING A FEATURE
 
-- Функциональность, защищённая на UI-уровне (кнопка скрыта), но доступная
-  напрямую через API без проверки на бэкенде.
-- Race condition в "check-then-act" (проверка роли и действие не атомарны).
-- Поведение для soft-deleted записей — доступны ли они через новый
-  эндпоинт, который не учитывает флаг удаления.
-- Bulk-вариант новой фичи (bulk-эндпоинт) — часто добавлен "по-быстрому" со
-  слабее проверенной авторизацией, чем у единичного аналога.
-- Вебхук, который фича добавляет — проверяется ли подпись/источник.
-- Feature-флаг фичи, выключенный "временно для отладки" и оставленный
-  выключенным по умолчанию в конфиге.
-- Различия dev/staging/prod — фикс, применённый в одной helm-values-
-  конфигурации, может отсутствовать в другой.
-- Экспорт данных, если фича его добавляет — авторизация на экспортируемый
-  объём так же строга, как на обычное чтение?
-- Старый/дублирующий путь, оставшийся после рефакторинга фичи (например,
-  старый эндпоинт не удалили, а просто перестали вызывать с фронтенда — он
-  всё ещё доступен и не обновлён под новую логику авторизации).
+- Functionality protected at the UI level (button hidden) but accessible
+  directly through the API without a backend check.
+- A race condition in "check-then-act" (the role check and the action are
+  not atomic).
+- Behavior for soft-deleted records — are they accessible through a new
+  endpoint that does not account for the deletion flag?
+- The bulk variant of the new feature (bulk endpoint) — often added "quick
+  and dirty" with weaker-verified authorization than its single-item
+  counterpart.
+- The webhook the feature adds — is the signature/origin verified?
+- The feature's feature flag, turned off "temporarily for debugging" and
+  left off by default in the config.
+- dev/staging/prod differences — a fix applied in one helm-values
+  configuration may be absent in another.
+- Data export, if the feature adds it — is authorization on the exported
+  volume as strict as on ordinary reads?
+- An old/duplicate path left behind after the feature's refactoring (e.g.
+  the old endpoint was not removed, it just stopped being called from the
+  frontend — it is still reachable and not updated to the new authorization
+  logic).
 
-## ШКАЛА SEVERITY (единая с полным аудитом репозитория)
+## SEVERITY SCALE (shared with the full repository audit)
 
-Единая шкала нужна, чтобы находки были сравнимы между проверками отдельных
-фич и общими аудитами (см. `security-audit-full`).
+A shared scale is needed so findings are comparable across individual
+feature checks and full audits (see `security-audit-full`).
 
-- **Critical**: неаутентифицированный внешний атакующий получает полный
-  компромисс через эту фичу (RCE, доступ ко всем данным всех
-  компаний-клиентов, обход аутентификации целиком).
-- **High**: аутентифицированный пользователь (в т.ч. с минимальной ролью)
-  получает через эту фичу доступ к чужим данным/привилегиям — включая
-  межтенантный доступ, либо неаутентифицированный атакующий получает доступ
-  к данным одной компании/одного пользователя.
-- **Medium**: требует специфичных условий (гонка, конкретная роль, MITM,
-  социальная инженерия) или ограничивается утечкой метаданных/DoS без
-  потери данных.
-- **Low**: нарушение best practice без прямого сценария эксплуатации на
-  момент проверки.
+- **Critical**: an unauthenticated external attacker achieves full compromise
+  through this feature (RCE, access to all data of all customer companies,
+  full authentication bypass).
+- **High**: an authenticated user (including one with a minimal role) gains
+  access to someone else's data/privileges through this feature — including
+  cross-tenant access — or an unauthenticated attacker gains access to the
+  data of one company/one user.
+- **Medium**: requires specific conditions (a race, a particular role, MITM,
+  social engineering) or is limited to metadata leakage/DoS without data
+  loss.
+- **Low**: a best-practice violation with no direct exploitation scenario at
+  the time of the check.
 
-Для каждой находки указывай кто может эксплуатировать (аноним /
-аутентифицированный юзер / только внутренняя сеть) и что теряется (чтение /
-запись / полный компромисс).
+For each finding, state who can exploit it (anonymous / authenticated user /
+internal network only) and what is lost (read / write / full compromise).
 
-## ФОРМАТ ОТЧЁТА
+## REPORT FORMAT
 
-1. Executive summary (без технического жаргона): безопасна ли фича к
-   релизу, что критично, что рискует бизнесом/регуляторикой, что делать в
-   первую очередь.
-2. SCOPE — итоговый список проверенных файлов/директорий/сервисов (см.
-   раздел "Входные данные" выше) и явное указание, что осталось ЗА
-   пределами SCOPE и почему (например, "общая библиотека X не проверялась
-   повторно, так как не менялась в рамках этой фичи").
-3. Вердикт по фиче: "готова к релизу" / "готова с оговорками (см.
-   low/medium)" / "не готова — есть critical/high находки" — одной фразой в
-   начале отчёта.
-4. Полный список находок: file:line, категория (можно сослаться на OWASP
-   Top 10 / OWASP API Security Top 10 / CWE), конкретный сценарий
-   эксплуатации, severity с обоснованием, статус, рекомендация по
-   исправлению.
-5. Раздел "что сделано хорошо" — сильные паттерны в реализации фичи,
-   которые стоит тиражировать.
-6. План действий: что блокирует релиз сейчас (critical/high), что можно
-   исправить после релиза с тикетом (medium/low).
-7. Раздел "что не было проверено" — ограничения покрытия (нет доступа к
-   прод-окружению, нет возможности прогнать сканер и т.п.), чтобы
-   отсутствие находок не читалось как "там всё чисто".
+1. Executive summary (no technical jargon): is the feature secure to
+   release, what is critical, what is a business/regulatory risk, what to do
+   first.
+2. SCOPE — the final list of reviewed files/directories/services (see the
+   "Input" section above) and an explicit note on what was left OUTSIDE the
+   SCOPE and why (e.g. "shared library X was not re-reviewed since it did
+   not change in this feature").
+3. Feature verdict: "ready to release" / "ready with caveats (see
+   low/medium)" / "not ready — there are critical/high findings" — in one
+   phrase at the top of the report.
+4. Full list of findings: file:line, category (may reference OWASP Top 10 /
+   OWASP API Security Top 10 / CWE), a concrete exploitation scenario,
+   severity with justification, status, remediation recommendation.
+5. A "what was done well" section — strong patterns in the feature's
+   implementation worth replicating.
+6. Action plan: what blocks the release now (critical/high), what can be
+   fixed after release with a ticket (medium/low).
+7. A "what was not checked" section — coverage limitations (no access to the
+   prod environment, no ability to run a scanner, etc.), so the absence of
+   findings does not read as "everything there is clean".
 
-## ПРАВИЛА ОФОРМЛЕНИЯ НАХОДОК
+## FINDING FORMATTING RULES
 
-Перед началом проверь, нет ли уже отчёта по этой же фиче в
-`docs/bugs/security_audit/` (например, по её feature-slug или ISSUE-ID из
-предыдущего прогона этого же скилла). Если есть — не начинай нумерацию с
-нуля: продолжи существующую последовательность ID и обнови статус уже
-известных находок ("не исправлено" → "исправлено" и т.п.), а не заводи их
-повторно как новые.
+Before starting, check whether a report for this same feature already exists
+in `docs/bugs/security_audit/` (e.g. by its feature-slug or ISSUE-ID from a
+previous run of this same skill). If it does, do not start numbering from
+zero: continue the existing ID sequence and update the status of already
+known findings ("not fixed" → "fixed", etc.), rather than re-raising them as
+new.
 
-Для каждой находки обязательны:
+For each finding, the following are mandatory:
 
-- Стабильный ID находки (например, `SEC-<ISSUE-ID или feature-slug>-001`),
-  уникальный в рамках отчётов по этой фиче (см. выше про повторный прогон).
-- Путь к файлу и номер строки (или диапазон).
-- Название уязвимости и категория (OWASP Top 10 / OWASP API Security Top
+- A stable finding ID (e.g. `SEC-<ISSUE-ID or feature-slug>-001`), unique
+  within the reports for this feature (see above on re-runs).
+- The file path and line number (or range).
+- The vulnerability name and category (OWASP Top 10 / OWASP API Security Top
   10 / CWE).
-- Конкретный сценарий эксплуатации: "если сделать запрос X с параметром Y,
-  система вернёт/сделает Z" — не абстрактные формулировки вроде "может быть
-  уязвимость".
-- Severity с обоснованием (кто может использовать, что теряется).
-- Рекомендация по исправлению — конкретная ("добавить else-ветку с явным
-  отказом", "включить флаг X по умолчанию", "заменить f-string на
-  параметризованный запрос").
+- A concrete exploitation scenario: "if you make request X with parameter Y,
+  the system will return/do Z" — not abstract wording like "there may be a
+  vulnerability".
+- Severity with justification (who can use it, what is lost).
+- A remediation recommendation — concrete ("add an else branch with an
+  explicit denial", "enable flag X by default", "replace the f-string with a
+  parameterized query").
 
-## ЗАПУСК ПРОВЕРКИ (практическая инструкция)
+## RUNNING THE CHECK (practical instructions)
 
-1. Сначала САМ (в основном потоке) выполни раздел "Входные данные" —
-   определи тип входных данных (директория/ветка/diff, документ, YouTrack
-   issue) и построй SCOPE. Не делегируй этот шаг: субагент стартует без
-   контекста разговора и не знает, что имелось в виду под "фичей".
-   Зафиксируй SCOPE явно, прежде чем переходить к разбору.
-2. Классифицируй фичу по типу изменений (новый API, новый UI, интеграция/
-   вебхук, загрузка файлов, инфраструктура и т.д.) и выбери применимые
-   блоки чек-листа.
-3. Проверь, нет ли уже отчёта по этой фиче в `docs/bugs/security_audit/`
-   (см. "Правила оформления находок") — это дешёвая проверка, которая
-   экономит повторную работу и сохраняет непрерывность нумерации находок.
-4. Запусти точечные автоматизированные проверки СРЕЗА 1 по файлам/
-   зависимостям из SCOPE (semgrep/bandit точечно, SCA на изменившиеся
-   lock-файлы, gitleaks по diff'у фичи).
-5. Проведи ручной построчный разбор СРЕЗА 2. Если SCOPE охватывает
-   несколько сервисов/директорий и доступен Agent tool — раздели на
-   независимые зоны и запусти отдельного субагента на зону (в foreground,
-   если результат нужен для дальнейшего решения в этом же диалоге), чтобы
-   не срезать угол по всему объёму разом. Каждому субагенту передай
-   конкретные пути и применимые разделы этого скилла (чек-лист, шкалу
-   severity, формат находки) — субагент не видит этот файл сам. Записывай
-   подтверждённые находки в промежуточный файл сразу по мере разбора каждой
-   зоны, а не держи их только в контексте до финального отчёта.
-6. Проведи СРЕЗ 3 — точки соприкосновения фичи с существующими
-   security-инвариантами платформы (аутентификация, мультитенантность,
-   internal-API, общие библиотеки).
-7. Сведи все три среза в единый отчёт по формату выше, убери дубликаты, но
-   не объединяй находки разной природы (сканер нашёл паттерн ≠ ручной
-   разбор подтвердил эксплуатируемость — фиксируй оба факта, если они
-   есть). Сохрани финальный отчёт файлом в
-   `docs/bugs/security_audit/<feature-slug>-security-review.md` (slug — по
-   ISSUE-ID или по имени фичи/директории) — это то же место, где лежит
-   реестр прошлых аудиторских находок, и следующий прогон этого скилла по
-   той же фиче должен его найти и обновить, а не пересоздавать с нуля.
-8. Явно укажи, какие проверки НЕ были выполнены (нет доступа к
-   прод-секретам, нет доступа к рантайм-логам, нет возможности прогнать
-   сканер и т.п.) — это часть честного отчёта, а не его слабость.
-9. Если в проекте настроен скилл/агент `security-review` (быстрое ревью
-   pending-изменений на текущей ветке) — можно использовать его как
-   отправную точку для СРЕЗА 2 по изменённым файлам, но не ограничивайся
-   только diff'ом: фича может опираться на существующий код, который не
-   менялся в текущей ветке, но участвует в её security-модели (см. СРЕЗ 3).
+1. First, YOURSELF (in the main thread), do the "Input" section — determine
+   the input type (directory/branch/diff, document, YouTrack issue) and build
+   the SCOPE. Do not delegate this step: a subagent starts without the
+   conversation context and does not know what was meant by "the feature".
+   Record the SCOPE explicitly before moving to the review.
+2. Classify the feature by change type (new API, new UI, integration/webhook,
+   file upload, infrastructure, etc.) and select the applicable checklist
+   blocks.
+3. Check whether a report for this feature already exists in
+   `docs/bugs/security_audit/` (see "Finding formatting rules") — this is a
+   cheap check that saves rework and preserves the continuity of finding
+   numbering.
+4. Run the focused automated checks of PASS 1 on the files/dependencies in
+   SCOPE (semgrep/bandit focused, SCA on the changed lock files, gitleaks on
+   the feature's diff).
+5. Perform the manual line-by-line review of PASS 2. If the SCOPE spans
+   several services/directories and the Agent tool is available, split it
+   into independent zones and launch a separate subagent per zone (in
+   foreground, if the result is needed for a further decision in this same
+   dialogue) so as not to cut corners across the whole volume at once. Give
+   each subagent the concrete paths and the applicable sections of this skill
+   (checklist, severity scale, finding format) — a subagent does not see this
+   file itself. Record confirmed findings in an intermediate file as you
+   review each zone, rather than keeping them only in context until the final
+   report.
+6. Perform PASS 3 — the feature's points of contact with the platform's
+   existing security invariants (authentication, multi-tenancy, internal-API,
+   shared libraries).
+7. Consolidate all three passes into a single report per the format above,
+   remove duplicates, but do not merge findings of different natures (a
+   scanner found a pattern ≠ manual review confirmed exploitability — record
+   both facts if both exist). Save the final report as a file at
+   `docs/bugs/security_audit/<feature-slug>-security-review.md` (slug — by
+   ISSUE-ID or by feature/directory name) — this is the same place where the
+   registry of past audit findings lives, and the next run of this skill on
+   the same feature should find and update it, rather than recreating it from
+   scratch.
+8. Explicitly state which checks were NOT performed (no access to prod
+   secrets, no access to runtime logs, no ability to run a scanner, etc.) —
+   this is part of an honest report, not its weakness.
+9. If the project has a `security-review` skill/agent configured (a quick
+   review of pending changes on the current branch), you can use it as a
+   starting point for PASS 2 on the changed files, but do not limit yourself
+   to the diff: the feature may rely on existing code that did not change in
+   the current branch but participates in its security model (see PASS 3).
 
-Это тестирование, не имплементация: правки вносит разработчик по итогам
-отчёта, не ты в рамках этого скилла.
+This is testing, not implementation: the developer makes the changes based on
+the report, not you within this skill.
+

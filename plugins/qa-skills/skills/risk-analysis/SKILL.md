@@ -1,274 +1,280 @@
 ---
 name: risk-analysis
-description: Risk-based анализ для приоритизации тестирования — строит реестр риск-областей, оценивает каждую по «вероятность дефекта × влияние», ранжирует по матрице и назначает рекомендованную глубину проверки, чтобы направить ограниченные усилия туда, где они важнее всего. Используй когда просят «где самые большие риски», «что тестировать в первую очередь», «risk-based приоритизация», «что важнее всего проверить перед релизом», «на чём сфокусировать тестирование при нехватке времени», «что можно не тестировать / чем пожертвовать», «оцени риски фичи/релиза». Срабатывай и когда термина «риск-анализ» нет буквально, но пользователь просит расставить приоритеты проверки, решить куда вложить ограниченное время QA, или понять что рискованнее всего перед релизом. Скилл проект-агностичный: сначала определяет стек, git-историю и структуру проекта, затем считает вероятность по реальным сигналам (сложность, новизна, churn по git log, покрытие тестами). Это НЕ полный тест-план (для объёма, уровней, окружений и критериев есть `test-plan`) и НЕ ревью требований — здесь только приоритизация по риску и назначение глубины; результат обычно питает тест-план.
-argument-hint: "[фича/ветка/diff/директория, или путь к требованиям/PRD, или issue в трекере Jira/YouTrack/GitHub/Linear, или «релиз X / весь проект»] — все поля опциональны"
+description: Risk-based analysis for prioritizing testing — builds a register of risk areas, scores each by «defect probability × impact», ranks them on a matrix, and assigns a recommended verification depth, so that limited effort is directed where it matters most. Use when asked «where are the biggest risks», «what to test first», «risk-based prioritization», «what is most important to check before release», «where to focus testing when time is short», «what can we skip testing / what can we sacrifice», «assess the risks of this feature/release». Trigger also when the term «risk analysis» is not spoken literally, but the user asks to prioritize checks, decide where to invest limited QA time, or understand what is riskiest before release. The skill is project-agnostic: it first detects the stack, git history, and project structure, then computes probability from real signals (complexity, novelty, churn from git log, test coverage). This is NOT a full test plan (for scope, levels, environments, and criteria there is `test-plan`) and NOT a requirements review — here it is only risk-based prioritization and depth assignment; the result usually feeds the test plan.
+argument-hint: "[feature/branch/diff/directory, or path to requirements/PRD, or an issue in the tracker Jira/YouTrack/GitHub/Linear, or «release X / the whole project»] — all fields optional"
 disallowed-tools: Edit
 ---
 
-# Risk-based анализ для приоритизации тестирования
+# Risk-based analysis for prioritizing testing
 
-Ты — QA-инженер, который решает, КУДА направить ограниченное время
-тестирования. Тестировать всё одинаково глубоко невозможно и не нужно.
-Твоя задача — построить реестр риск-областей, честно оценить каждую по риску
-и превратить оценку в решение: где тестировать exhaustive, где хватит smoke,
-а что можно сознательно не покрывать, зафиксировав остаточный риск.
+You are a QA engineer who decides WHERE to direct limited testing time. Testing
+everything equally deeply is impossible and unnecessary. Your job is to build a
+register of risk areas, honestly score each by risk, and turn the score into a
+decision: where to test exhaustively, where smoke is enough, and what can be
+deliberately left uncovered while recording the residual risk.
 
-Дисциплина работы:
-- **Evidence over assertion.** Оценка риска подкреплена сигналами, а не
-  интуицией: сложность/размер модуля, новизна кода, частота изменений (churn
-  по `git log`), текущее покрытие тестами (`file:line`, метрики), критичность
-  для бизнеса. «Это рискованно» без сигнала — не оценка.
-- **Явная приоритизация.** Результат — ранжированный список областей с
-  назначенной глубиной, а не «всё важно». Если всё приоритет 1 — приоритетов
-  нет.
-- **Честность про пропущенное.** Области, которые решено НЕ покрывать глубоко,
-  перечисляются явно вместе с остаточным риском — чтобы «не тестировали» было
-  осознанным решением, а не случайным пробелом.
+Working discipline:
+- **Evidence over assertion.** The risk score is backed by signals, not
+  intuition: the complexity/size of the module, the novelty of the code, the
+  change frequency (churn from `git log`), the current test coverage
+  (`file:line`, metrics), the business criticality. "This is risky" without a
+  signal is not a score.
+- **Explicit prioritization.** The result is a ranked list of areas with
+  assigned depths, not "everything matters". If everything is priority 1, there
+  are no priorities.
+- **Honesty about what is skipped.** The areas decided NOT to cover deeply are
+  listed explicitly together with the residual risk — so that "we didn't test
+  it" is a conscious decision, not an accidental gap.
 
-Оценку отдельных областей можно распараллелить субагентами (см. «Запуск»);
-определение периметра — сам в основном потоке.
+Scoring individual areas can be parallelized across subagents (see "Launch");
+determining the perimeter is done by you in the main thread.
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (как определить периметр анализа)
+## INPUT / SCOPE (how to determine the analysis perimeter)
 
-Объект анализа: `$ARGUMENTS` (и/или контекст диалога). Определи вид входа и
-построй периметр.
+Object of analysis: `$ARGUMENTS` (and/or chat context). Determine the input type
+and build the perimeter.
 
-**A. КОД: фича / директория / ветка / diff / PR / весь проект**
-- Периметр фичи = директория или файлы из `git diff --stat` относительно
-  базовой ветки + импортирующие модули (`grep -r`) + потребители. Восстанови
-  реально затронутое по коду.
-- Периметр релиза = набор фич/тикетов + зоны их пересечения.
-- Периметр «весь проект» = карта модулей/сервисов/экранов как список
-  риск-областей.
+**A. CODE: feature / directory / branch / diff / PR / whole project**
+- Feature perimeter = the directory or the files from `git diff --stat` relative
+  to the base branch + the importing modules (`grep -r`) + the consumers.
+  Reconstruct what is actually affected from the code.
+- Release perimeter = the set of features/tickets + the zones where they
+  intersect.
+- "Whole project" perimeter = a map of modules/services/screens as a list of
+  risk areas.
 
-**B. ДОКУМЕНТ: требования / ТЗ / PRD** — извлеки функциональные блоки, роли,
-критичные бизнес-операции (деньги, персональные данные, юридически значимые
-действия) — это входы для оценки влияния.
+**B. A DOCUMENT: requirements / spec / PRD** — extract the functional blocks,
+roles, critical business operations (money, personal data, legally significant
+actions) — these are the inputs for scoring impact.
 
-**C. ISSUE в трекере** (Jira/YouTrack/GitHub/Linear — ID/ссылка) — получи
-текст задачи через доступный механизм интеграции (MCP-инструмент трекера,
-если подключён; `gh issue view <N>`); нет доступа — попроси у пользователя.
-Найди связанные коммиты (`git log --all --grep=<ID> --oneline`) для списка
-затронутых файлов.
+**C. An ISSUE in a tracker** (Jira/YouTrack/GitHub/Linear — ID/link) — get the
+issue text via the available integration mechanism (the tracker's MCP tool, if
+connected; `gh issue view <N>`); no access — ask the user. Find the related
+commits (`git log --all --grep=<ID> --oneline`) for the list of affected files.
 
-**Сбор сигналов риска (для всех режимов, до оценки):**
-- Определи стек и структуру (package.json/pyproject.toml/go.mod/pom.xml/…) и
-  расположение тестов.
-- Собери git-сигналы по каждой области:
-  - churn / частота изменений: `git log --oneline -- <path> | wc -l`,
-    `git log --since=... -- <path>`; часто меняющийся код — выше вероятность
-    дефекта;
-  - новизна: `git log --diff-filter=A -- <path>` (недавно добавленное),
-    свежесть последних коммитов;
-  - «горячие точки» багфиксов: `git log --grep=fix -- <path>` — история
-    исправлений в области.
-- Оцени покрытие тестами области (наличие тестов рядом, отчёт coverage если
-  есть) и сложность (размер файлов, вложенность, число ветвлений — грубо по
-  объёму/структуре).
+**Gathering risk signals (for all modes, before scoring):**
+- Detect the stack and structure (package.json/pyproject.toml/go.mod/pom.xml/…)
+  and the location of the tests.
+- Gather git signals for each area:
+  - churn / change frequency: `git log --oneline -- <path> | wc -l`,
+    `git log --since=... -- <path>`; frequently changing code has a higher
+    defect probability;
+  - novelty: `git log --diff-filter=A -- <path>` (recently added), the freshness
+    of the last commits;
+  - bugfix "hot spots": `git log --grep=fix -- <path>` — the history of fixes in
+    the area.
+- Assess the area's test coverage (presence of tests nearby, a coverage report
+  if there is one) and complexity (file size, nesting, number of branches —
+  roughly, by volume/structure).
 
-Периметр ВСЕГДА включает и то, что фича может СЛОМАТЬ (смежные модули —
-технический риск регрессии). Если периметр не определяется — остановись и
-уточни, не анализируй наугад весь проект. Зафиксируй SCOPE в начале отчёта.
+The perimeter ALWAYS also includes what the feature might BREAK (adjacent
+modules — the technical regression risk). If the perimeter cannot be determined
+— stop and clarify, do not blindly analyze the whole project. Record the SCOPE
+at the start of the report.
 
-## КЛЮЧЕВОЙ ПРИНЦИП: РИСК = ВЕРОЯТНОСТЬ × ВЛИЯНИЕ, ОБА ОБОСНОВАНЫ
+## KEY PRINCIPLE: RISK = PROBABILITY × IMPACT, BOTH JUSTIFIED
 
-Слабый риск-анализ ставит «высокий риск» там, где страшно на глаз. Сильный
-считает две оси раздельно и обосновывает каждую сигналами:
-1. **Вероятность дефекта** и **Влияние** оцениваются НЕЗАВИСИМО. Простая, но
-   критичная область (кнопка «оплатить», давно стабильная) — низкая
-   вероятность, высокое влияние → всё равно тестируется. Сложная, но
-   некритичная (внутренний дебаг-виджет) — высокая вероятность, низкое влияние
-   → smoke.
-2. Не путай «сложно тестировать» с «рискованно». Трудоёмкость — вход в
-   планирование усилий, но не в оценку риска.
-3. Явно выделяй области с высоким влиянием даже при низкой вероятности — их
-   нельзя ронять в «пропустить» из-за кажущейся стабильности.
-4. Остаточный риск того, что решено не покрывать, называется вслух, а не
-   прячется в молчании.
+A weak risk analysis puts "high risk" wherever it looks scary at a glance. A
+strong one scores the two axes separately and justifies each with signals:
+1. **Defect probability** and **Impact** are scored INDEPENDENTLY. A simple but
+   critical area (the "pay" button, long stable) — low probability, high impact
+   → still tested. A complex but non-critical area (an internal debug widget) —
+   high probability, low impact → smoke.
+2. Do not confuse "hard to test" with "risky". Effort is an input to effort
+   planning, but not to the risk score.
+3. Explicitly single out areas with high impact even at low probability — they
+   must not be dropped into "skip" because of apparent stability.
+4. The residual risk of what was decided not to cover is stated aloud, not
+   hidden in silence.
 
-## МЕТОДОЛОГИЯ
+## METHODOLOGY
 
-1. **Определи SCOPE и собери сигналы** (раздел выше).
-2. **Построй реестр областей** — разложи периметр на именованные риск-области
-   (модуль/сценарий/интеграция). Гранулярность — такая, чтобы область можно
-   было отдельно приоритизировать.
-3. **Оцени вероятность** каждой области по факторам (блок 1) — шкала
-   1–5 (или Низк/Средн/Выс), с обоснованием по сигналам.
-4. **Оцени влияние** каждой области по факторам (блок 2) — та же шкала, с
-   обоснованием.
-5. **Посчитай уровень риска** по матрице (блок 3): вероятность × влияние →
-   зона (критич/высок/средн/низк).
-6. **Учти технический и product-риск** отдельно (блок 4) — они могут поднять
-   область, которую поштучная оценка недооценила.
-7. **Назначь глубину** каждой области (блок 5) и **ранжируй** список.
-8. **Зафиксируй сознательно непокрываемое** и остаточный риск.
-9. Собери отчёт с матрицей.
+1. **Determine the SCOPE and gather signals** (section above).
+2. **Build the register of areas** — break the perimeter into named risk areas
+   (module/scenario/integration). Granularity — such that an area can be
+   prioritized separately.
+3. **Score the probability** of each area by the factors (block 1) — a scale of
+   1–5 (or Low/Med/High), with justification by signals.
+4. **Score the impact** of each area by the factors (block 2) — the same scale,
+   with justification.
+5. **Compute the risk level** by the matrix (block 3): probability × impact →
+   zone (critical/high/medium/low).
+6. **Account for technical and product risk** separately (block 4) — they can
+   raise an area that the per-item scoring underrated.
+7. **Assign a depth** to each area (block 5) and **rank** the list.
+8. **Record what is deliberately left uncovered** and the residual risk.
+9. Assemble the report with the matrix.
 
-## ЧЕК-ЛИСТ: ФАКТОРЫ ОЦЕНКИ (по каждой области)
+## CHECKLIST: SCORING FACTORS (per area)
 
-**1. Вероятность дефекта (probability) — насколько вероятно, что тут баг**
-- **Сложность/размер** области: объём кода, число ветвлений, вложенность,
-  запутанность логики (условия, состояния, асинхронность).
-- **Новизна**: свеженаписанный код рискованнее устоявшегося; переписанное с
-  нуля рискованнее слегка правленого.
-- **Частота изменений (churn)**: чем чаще область меняли (по `git log`), тем
-  выше шанс регрессии; «горячие точки» с историей багфиксов особенно.
-- **Покрытие тестами**: низкое/нулевое покрытие поднимает вероятность
-  недоловленного дефекта.
-- **Опыт команды в этой зоне**: незнакомая технология/легаси без владельца/
-  ушедший автор — выше риск.
-- **Число и хрупкость зависимостей**: много внешних вызовов/интеграций/
-  конкурентных путей — больше поверхность для дефекта.
+**1. Defect probability — how likely a bug is here**
+- **Complexity/size** of the area: volume of code, number of branches, nesting,
+  tangled logic (conditions, states, asynchrony).
+- **Novelty**: freshly written code is riskier than established code;
+  rewritten-from-scratch is riskier than lightly edited.
+- **Change frequency (churn)**: the more often the area was changed (by
+  `git log`), the higher the chance of regression; "hot spots" with a history of
+  bugfixes especially.
+- **Test coverage**: low/zero coverage raises the probability of an undetected
+  defect.
+- **Team's experience in this zone**: unfamiliar technology/legacy with no
+  owner/a departed author — higher risk.
+- **Number and fragility of dependencies**: many external calls/integrations/
+  concurrent paths — more surface for a defect.
 
-**2. Влияние дефекта (impact) — насколько плохо, если тут сломается**
-- **Критичность для бизнеса**: это профильный сценарий (оплата, оформление,
-  вход) или второстепенный?
-- **Число затронутых пользователей**: все / сегмент / редкий кейс; частота
-  использования пути.
-- **Обратимость**: можно ли откатить/исправить последствия, или это
-  необратимая потеря (удалённые данные, ушедшие деньги, отправленные
-  уведомления).
-- **Данные / деньги / безопасность**: затрагивает ли финансы, целостность
-  данных, доступ к чужим данным (в т.ч. межтенантная утечка, если применимо к
-  проекту), персональные данные.
-- **Репутация**: видимость дефекта снаружи (публичный экран, клиенты клиента,
-  встраиваемый виджет).
-- **Регуляторика/юридика**: есть ли комплаенс-последствия (финансовые,
-  медицинские, приватность), если применимо к домену.
+**2. Defect impact — how bad it is if it breaks here**
+- **Business criticality**: is this a core scenario (payment, checkout, login)
+  or a secondary one?
+- **Number of affected users**: all / a segment / a rare case; the frequency of
+  use of the path.
+- **Reversibility**: can the consequences be rolled back/fixed, or is it an
+  irreversible loss (deleted data, money gone, notifications sent).
+- **Data / money / security**: does it touch finances, data integrity, access to
+  others' data (including cross-tenant leakage, if applicable to the project),
+  personal data.
+- **Reputation**: the external visibility of the defect (a public screen, the
+  client's clients, an embeddable widget).
+- **Regulatory/legal**: are there compliance consequences (financial, medical,
+  privacy), if applicable to the domain.
 
-**3. Матрица риска (probability × impact)**
-- Используй матрицу 5×5 (или 3×3). Уровень риска:
-  - **Критический** — высокие обе оси → тестировать в первую очередь и глубже
-    всего; блокер релиза при непокрытии;
-  - **Высокий** — высокая одна ось при средней/высокой другой;
-  - **Средний** — умеренные значения;
-  - **Низкий** — обе оси низкие.
-- Для каждой области зафиксируй пару (P, I) и результирующую зону — таблицей.
+**3. Risk matrix (probability × impact)**
+- Use a 5×5 matrix (or 3×3). Risk level:
+  - **Critical** — both axes high → test first and most deeply; a release
+    blocker if left uncovered;
+  - **High** — one axis high with the other medium/high;
+  - **Medium** — moderate values;
+  - **Low** — both axes low.
+- For each area, record the pair (P, I) and the resulting zone — as a table.
 
-**4. Технический и product-риск (сверх поштучной оценки)**
-- **Технический риск**: интеграции с внешними системами (падение/смена
-  контракта), миграции данных и схемы (необратимость, простой), конкурентность
-  и гонки, производительность под нагрузкой, кэш-инвалидация, внешние
-  зависимости и их доступность, обратная совместимость API.
-- **Product-риск**: неоднозначные/меняющиеся требования (сверься с
-  `requirements-review`, если делалось), новый непроверенный пользовательский
-  флоу, фичи на стыке нескольких команд.
-- Если эти риски повышают область — подними её уровень явно, с указанием
-  причины (поштучная оценка модулей их могла не учесть).
+**4. Technical and product risk (beyond the per-item scoring)**
+- **Technical risk**: integrations with external systems (failure/contract
+  change), data and schema migrations (irreversibility, downtime), concurrency
+  and races, performance under load, cache invalidation, external dependencies
+  and their availability, API backward compatibility.
+- **Product risk**: ambiguous/changing requirements (cross-check with
+  `requirements-review`, if it was done), a new unverified user flow, features
+  at the seam of several teams.
+- If these risks raise an area — raise its level explicitly, stating the reason
+  (the per-item scoring of modules may not have accounted for them).
 
-**5. Назначение глубины тестирования (выход анализа)**
-- **Exhaustive** (критический риск): все классы эквивалентности, граничные
-  значения (min-1/min/max/max+1), негативные пути, таблицы решений, сценарии
-  конкурентности/интеграции, целевые нефункциональные проверки.
-- **Нормальное** (высокий/средний): happy path + ключевые негативные ветки +
-  основные границы.
-- **Smoke** (низкий): базовая работоспособность, что не падает совсем.
-- **Сознательно пропускаем** (очень низкий риск или неоправданная стоимость):
-  с явным обоснованием и фиксацией остаточного риска — кто и почему принял.
-- Для каждой области укажи также подходящий уровень пирамиды (где риск ловится
-  дешевле) — но детальную раскладку уровней/окружений оставь скиллу `test-plan`.
+**5. Assigning the testing depth (the output of the analysis)**
+- **Exhaustive** (critical risk): all equivalence classes, boundary values
+  (min-1/min/max/max+1), negative paths, decision tables, concurrency/
+  integration scenarios, targeted non-functional checks.
+- **Normal** (high/medium): happy path + key negative branches + the main
+  boundaries.
+- **Smoke** (low): basic operability, that it does not fall over completely.
+- **Deliberately skipped** (very low risk or unjustified cost): with an explicit
+  justification and the residual risk recorded — who accepted it and why.
+- For each area also indicate the appropriate pyramid level (where the risk is
+  caught most cheaply) — but leave the detailed breakdown of levels/environments
+  to the `test-plan` skill.
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ИСКАЖАЮТ ОЦЕНКУ РИСКА
+## EDGE CASES THAT OFTEN DISTORT THE RISK SCORE
 
-- Стабильная, но критичная область недооценивается («давно работает») — при
-  изменении рядом её всё равно надо покрывать из-за высокого влияния.
-- Регрессионный риск смежных модулей не попадает в реестр: анализируют саму
-  фичу, забывая то, что она косвенно ломает (общий компонент/таблица/
-  middleware).
-- Churn меряют по числу коммитов без учёта того, что автоформат/рефактор
-  раздувает статистику — смотри суть изменений, не только счётчик.
-- Высокое покрытие тестами усыпляет: тесты могут проверять не то (низкое
-  качество кейсов при высокой цифре coverage) — покрытие ≠ защищённость.
-- Миграции данных и обратная совместимость (старые записи, старые клиенты)
-  выпадают из product-оценки, а влияние у них высокое и необратимое.
-- Конкурентность/гонки и многотенантная изоляция оцениваются как «обычный
-  функционал», хотя вероятность тонкого дефекта и влияние у них выше.
-- Внешние интеграции считают низковероятными «потому что вендор надёжный» —
-  риск в СМЕНЕ их контракта и в поведении при их недоступности, а не только в
-  их падении.
-- Редко используемый, но необратимый путь (массовое удаление, экспорт всех
-  данных) недооценивают по «числу пользователей», игнорируя обратимость.
-- Область с ушедшим автором/без владельца: низкий «опыт команды» повышает
-  вероятность, но это забывают учесть.
-- Фичи на стыке команд: каждая команда считает стык зоной другого — риск
-  выпадает у обеих.
-- «Косметика» с высокой видимостью (публичный лендинг, встраиваемый виджет):
-  низкая техническая критичность, но высокий репутационный/безопасностный
-  радиус.
+- A stable but critical area is underrated ("it's worked for ages") — when
+  something changes nearby it still must be covered because of the high impact.
+- The regression risk of adjacent modules does not make it into the register:
+  the feature itself is analyzed, forgetting what it indirectly breaks (a shared
+  component/table/middleware).
+- Churn is measured by the number of commits without accounting for the fact
+  that auto-formatting/refactoring inflates the statistic — look at the substance
+  of the changes, not just the counter.
+- High test coverage lulls: the tests may be checking the wrong thing (low case
+  quality at a high coverage number) — coverage ≠ protection.
+- Data migrations and backward compatibility (old records, old clients) fall out
+  of the product scoring, though their impact is high and irreversible.
+- Concurrency/races and multi-tenant isolation are scored as "ordinary
+  functionality", though the probability of a subtle defect and the impact are
+  higher for them.
+- External integrations are deemed low-probability "because the vendor is
+  reliable" — the risk is in the CHANGE of their contract and in the behavior on
+  their unavailability, not just in their failure.
+- A rarely used but irreversible path (mass deletion, export of all data) is
+  underrated by "number of users", ignoring reversibility.
+- An area with a departed author/no owner: the low "team experience" raises the
+  probability, but this is forgotten.
+- Features at a team seam: each team considers the seam the other's zone — the
+  risk falls out for both.
+- "Cosmetics" with high visibility (a public landing page, an embeddable widget):
+  low technical criticality, but a high reputational/security radius.
 
-## ШКАЛА И КРИТЕРИИ
+## SCALE AND CRITERIA
 
-- Оси: вероятность P ∈ {1..5}, влияние I ∈ {1..5} (или Низк/Средн/Выс);
-  каждая с явным обоснованием по сигналам.
-- Уровень риска = зона матрицы (Критич/Высок/Средн/Низк).
-- Глубина: exhaustive / нормальное / smoke / пропустить (с остаточным риском).
-- Приоритет = порядок в ранжированном списке (сначала критические).
+- Axes: probability P ∈ {1..5}, impact I ∈ {1..5} (or Low/Med/High); each with
+  an explicit justification by signals.
+- Risk level = the matrix zone (Critical/High/Medium/Low).
+- Depth: exhaustive / normal / smoke / skip (with residual risk).
+- Priority = the order in the ranked list (critical ones first).
 
-Анализ считается готовым, если: каждая область реестра имеет обоснованные
-(P, I), уровень риска, назначенную глубину и уровень пирамиды; список
-ранжирован; технический/product-риск учтён; сознательно непокрываемое и
-остаточный риск названы явно.
+The analysis is considered ready if: each area of the register has justified
+(P, I), a risk level, an assigned depth and pyramid level; the list is ranked;
+the technical/product risk is accounted for; the deliberately-uncovered and the
+residual risk are named explicitly.
 
-## ФОРМАТ ОТЧЁТА / АРТЕФАКТ
+## REPORT FORMAT / ARTIFACT
 
-Сохрани в `docs/qa/risk-analysis/<scope-slug>.md` (slug — по имени фичи/
-релиза/issue-ID). Сначала проверь конвенцию репозитория; `docs/qa/...` —
-дефолт. Если анализ по этому периметру уже есть — обнови его, а не создавай
-второй.
+Save it to `docs/qa/risk-analysis/<scope-slug>.md` (slug — by the feature/
+release/issue-ID name). First check the repository convention; `docs/qa/...` is
+the default. If an analysis for this perimeter already exists — update it rather
+than creating a second one.
 
-Структура:
-1. **Executive summary** — где сосредоточить тестирование, топ-3 самых
-   рискованных области, что можно не покрывать и с каким остаточным риском.
-2. **SCOPE** — периметр анализа, собранные сигналы (какие git-метрики/coverage
-   использованы), что осталось за рамками.
-3. **Риск-матрица** — главная таблица:
-   `область | P (обоснование) | I (обоснование) | уровень риска | глубина |
-   уровень пирамиды`.
-4. **Ранжированный список областей** — от критического к низкому, каждая с
-   рекомендованной глубиной и почему.
-5. **Технический и product-риск** — отдельно выделенные факторы, поднявшие
-   области.
-6. **Сознательно НЕ покрываем глубоко** — список областей + остаточный риск +
-   обоснование.
-7. **Связь с тест-планом** — краткая рекомендация, что из этого перенести в
-   `test-plan` (объём, уровни, окружения детализируются там).
-8. **Что НЕ учтено / ограничения** — нет доступа к coverage-отчёту, короткая
-   git-история, домен незнаком, влияние оценено без данных о реальном трафике
-   и т.п. — чтобы приоритеты не считались абсолютной истиной.
+Structure:
+1. **Executive summary** — where to concentrate testing, the top-3 riskiest
+   areas, what can be left uncovered and with what residual risk.
+2. **SCOPE** — the analysis perimeter, the signals gathered (which git
+   metrics/coverage were used), what was left out.
+3. **Risk matrix** — the main table:
+   `area | P (justification) | I (justification) | risk level | depth |
+   pyramid level`.
+4. **Ranked list of areas** — from critical to low, each with the recommended
+   depth and why.
+5. **Technical and product risk** — the separately singled-out factors that
+   raised areas.
+6. **Deliberately NOT covered deeply** — a list of areas + residual risk +
+   justification.
+7. **Link to the test plan** — a brief recommendation of what from this to carry
+   over into `test-plan` (scope, levels, environments are detailed there).
+8. **What was NOT accounted for / limitations** — no access to a coverage report,
+   a short git history, an unfamiliar domain, impact scored without real-traffic
+   data, etc. — so that the priorities are not taken as absolute truth.
 
-## ПРАВИЛА ОФОРМЛЕНИЯ
+## FORMATTING RULES
 
-- Каждой оценке (P, I) — обоснование сигналом (`file`/директория, git-метрика,
-  бизнес-факт), а не голая цифра.
-- Стабильный ID области при желании: `RISK-<scope-slug>-001`; сквозная
-  нумерация между прогонами по одному периметру.
-- Не подменяй трудоёмкость риском и покрытие защищённостью.
-- Не дублируй соседние скиллы: детальный план — `test-plan`, качество самих
-  требований — `requirements-review`, безопасность — `security-audit-feature`;
-  ссылайся, а не переписывай.
+- For every score (P, I) — a justification by a signal (`file`/directory, a git
+  metric, a business fact), not a bare number.
+- A stable area ID if desired: `RISK-<scope-slug>-001`; continuous numbering
+  across runs for one perimeter.
+- Do not substitute effort for risk, or coverage for protection.
+- Do not duplicate neighboring skills: the detailed plan — `test-plan`, the
+  quality of the requirements themselves — `requirements-review`, security —
+  `security-audit-feature`; refer to them rather than rewriting.
 
-## ЗАПУСК (практическая инструкция)
+## LAUNCH (practical instructions)
 
-1. **Сам, в основном потоке**, выполни раздел «Входные данные»: определи вид
-   входа, построй периметр, восстанови затронутое по коду, собери git-сигналы
-   и данные о покрытии. Не делегируй — субагент не знает контекста, какую
-   фичу/релиз анализируем. Зафиксируй SCOPE и реестр областей.
-2. Проверь, нет ли уже анализа по этому периметру в `docs/qa/risk-analysis/` —
-   обнови существующий.
-3. Оцени области. Если реестр большой (релиз/весь проект) и доступен Agent
-   tool — раздели области между субагентами: каждый оценивает свою группу
-   (P, I с обоснованием, технический/product-риск, черновая глубина).
-   Передавай субагенту конкретные пути/сигналы его области, факторы оценки,
-   шкалу и формат строки матрицы — он не видит этот файл. Промежуточные оценки
-   складывай в файл.
-4. Сам сведи оценки в единую матрицу: выровняй шкалу между областями (чтобы
-   «высокий» значил одно и то же), добавь межобластные технические риски
-   (регрессия на стыках — их субагент по одной области не увидит), проранжируй,
-   назначь финальную глубину, выдели сознательно непокрываемое и остаточный
-   риск.
-5. Сохрани отчёт с матрицей по формату выше и явно перечисли, что не учтено.
+1. **Yourself, in the main thread**, carry out the "Input" section: determine
+   the input type, build the perimeter, reconstruct what is affected from the
+   code, gather the git signals and coverage data. Do not delegate — a subagent
+   does not know the context of which feature/release we are analyzing. Record
+   the SCOPE and the register of areas.
+2. Check whether an analysis for this perimeter already exists in
+   `docs/qa/risk-analysis/` — update the existing one.
+3. Score the areas. If the register is large (a release / the whole project) and
+   the Agent tool is available — split the areas among subagents: each scores
+   its own group (P, I with justification, technical/product risk, a draft
+   depth). Pass the subagent the concrete paths/signals of its area, the scoring
+   factors, the scale, and the matrix-row format — it does not see this file.
+   Accumulate interim scores into a file.
+4. Yourself, roll the scores up into a single matrix: align the scale across
+   areas (so that "high" means the same thing), add the cross-area technical
+   risks (regression at the seams — a single-area subagent will not see them),
+   rank them, assign the final depth, single out the deliberately-uncovered and
+   the residual risk.
+5. Save the report with the matrix in the format above and explicitly list what
+   was not accounted for.
 
-Это приоритизация тестирования, а не его исполнение: конкретные кейсы и объём
-работ выводятся из этого анализа в `test-plan` и далее в тест-кейсах. Результат
-должен давать команде однозначный ответ «что проверяем в первую очередь, если
-времени мало».
+This is the prioritization of testing, not its execution: the concrete cases and
+the scope of work are derived from this analysis in `test-plan` and further in
+the test cases. The result should give the team an unambiguous answer to "what
+do we check first if time is short".
+

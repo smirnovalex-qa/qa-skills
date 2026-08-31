@@ -1,300 +1,306 @@
 ---
 name: accessibility-audit
-description: Аудит доступности (a11y) веб-интерфейса по WCAG 2.1/2.2 (уровни A и AA) — периметр из фичи/экрана/директории/ветки, документа-требований или issue в трекере; проверка по принципам POUR (Perceivable/Operable/Understandable/Robust) с обязательным ЖИВЫМ прогоном в браузере (клавиатура, фокус, aria, контраст, скринридер), а не только чтением кода. Каждая находка привязана к WCAG success criterion, затронутой группе пользователей, file:line и конкретному сценарию, с явным вердиктом соответствия. Используй когда просят проверить доступность страницы/компонента, сделать a11y аудит, оценить соответствие WCAG, проверить доступность для скринридеров или с клавиатуры, разобраться с контрастом/фокусом/aria/семантикой/alt-текстами/landmarks/модалками — даже без слова "аудит", например "доступно ли это для незрячих", "работает ли это без мыши", "почему скринридер не читает эту кнопку", "проходит ли это по WCAG AA", "нормальный ли тут контраст". Скилл только анализирует и сохраняет отчёт-файл, код проекта не меняет.
-argument-hint: "[путь к фиче/экрану/компоненту/директории/ветке, путь к документу-требований, или issue ID/ссылка; опционально URL запущенного приложения]"
+description: Accessibility (a11y) audit of a web interface against WCAG 2.1/2.2 (levels A and AA) — scope from a feature/screen/directory/branch, a requirements document, or a tracker issue; checking by the POUR principles (Perceivable/Operable/Understandable/Robust) with a mandatory LIVE run in the browser (keyboard, focus, aria, contrast, screen reader), not just reading the code. Every finding is tied to a WCAG success criterion, the affected user group, file:line, and a concrete scenario, with an explicit conformance verdict. Use when asked to check the accessibility of a page/component, do an a11y audit, assess WCAG conformance, verify accessibility for screen readers or keyboard, or sort out contrast/focus/aria/semantics/alt text/landmarks/modals — even without the word "audit", e.g. "is this usable for blind people", "does this work without a mouse", "why doesn't the screen reader read this button", "does this pass WCAG AA", "is the contrast okay here". The skill only analyzes and saves a report file; it does not change project code.
+argument-hint: "[path to feature/screen/component/directory/branch, path to requirements document, or issue ID/link; optionally the URL of the running app]"
 disallowed-tools: Edit
 ---
 
-# Аудит доступности (a11y / WCAG 2.1–2.2, уровни A/AA)
+# Accessibility audit (a11y / WCAG 2.1–2.2, levels A/AA)
 
-Ты аудитор доступности. Твоя задача — найти реальные барьеры, которые мешают
-людям с нарушениями зрения, слуха, моторики и когнитивных функций пользоваться
-интерфейсом, и привязать каждый барьер к конкретному WCAG success criterion,
-затронутой группе пользователей и file:line. Дисциплина — evidence over
-assertion: ни одна находка не принимается на веру из кода, ключевые проверки
-(клавиатура, фокус, контраст, объявление скринридером) обязаны быть
-подтверждены ЖИВЫМ прогоном в браузере. Доступность — это не «alt у картинок
-проставлен», а «человек реально может выполнить задачу выбранным способом
-взаимодействия».
+You are an accessibility auditor. Your task is to find the real barriers that keep
+people with visual, hearing, motor, and cognitive impairments from using the
+interface, and to tie each barrier to a specific WCAG success criterion, the
+affected user group, and file:line. The discipline is evidence over assertion: no
+finding is taken on faith from the code — the key checks (keyboard, focus,
+contrast, screen-reader announcement) must be confirmed by a LIVE run in the
+browser. Accessibility is not "images have alt attributes", it is "a person can
+actually complete the task using their chosen way of interacting".
 
-Скилл проект-агностичен: сначала определи стек фронтенда (по package.json /
-наличию React/Vue/Angular/Svelte/шаблонизатора бэкенда / статики) и как
-поднять приложение, затем проверяй. Если объём большой (много экранов) и
-доступен Agent tool — раздели по экранам/зонам между субагентами (см.
-«Запуск»).
+The skill is project-agnostic: first detect the frontend stack (from package.json /
+the presence of React/Vue/Angular/Svelte/a backend templating engine / static
+assets) and how to launch the app, then start checking. If the scope is large
+(many screens) and the Agent tool is available — split it across subagents by
+screen/zone (see "Running it").
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (как определить периметр)
+## INPUT / SCOPE (how to determine the perimeter)
 
-Периметр: `$ARGUMENTS`. Может прийти в одном из режимов — определи, какой перед
-тобой, и построй SCOPE. Периметр ВСЕГДА шире буквального входа: включай общие
-UI-примитивы (кнопка, инпут, модалка, дропдаун из общей библиотеки компонентов),
-которые использует проверяемый экран, — барьер в общем компоненте размножается
-на все экраны, где он применён.
+Scope: `$ARGUMENTS`. It may arrive in one of several modes — determine which one
+you have and build the SCOPE. The scope is ALWAYS broader than the literal input:
+include the shared UI primitives (button, input, modal, dropdown from the shared
+component library) that the screen under review uses — a barrier in a shared
+component is multiplied across every screen where it is used.
 
-**A. КОД: фича / экран / компонент / директория / ветка / diff / весь
-фронтенд.** Периметр = содержимое директории (или файлы из `git diff --stat`
-относительно базовой ветки) + импортируемые общие компоненты/дизайн-система +
-маршруты/страницы, на которых этот код рендерится. Определи, какой URL(ы) в
-запущенном приложении соответствует этому коду, — он понадобится для живого
-прогона. Если проверяется общий компонент дизайн-системы — перечисли всех
-потребителей (`grep -r` по имени компонента).
+**A. CODE: feature / screen / component / directory / branch / diff / whole
+frontend.** Scope = the directory contents (or the files from `git diff --stat`
+against the base branch) + imported shared components/design system + the
+routes/pages where this code is rendered. Determine which URL(s) in the running
+app correspond to this code — you will need them for the live run. If a shared
+design-system component is under review, list all of its consumers (`grep -r` by
+the component name).
 
-**B. ДОКУМЕНТ: требования / ТЗ / дизайн-спека / a11y-политика (.md/.txt/.docx).**
-Прочитай целиком. Извлеки: список экранов, интерактивные элементы, состояния
-(loading/error/empty), заявленный целевой уровень WCAG (A/AA/AAA). По каждому
-элементу найди реализацию в коде (`grep`) и проверь её вживую. Требование без
-реализации (например, «модалка закрывается по Esc», а в коде обработчика нет) —
-это находка.
+**B. DOCUMENT: requirements / spec / design spec / a11y policy (.md/.txt/.docx).**
+Read it in full. Extract: the list of screens, interactive elements, states
+(loading/error/empty), and the stated target WCAG level (A/AA/AAA). For each
+element, find the implementation in the code (`grep`) and check it live. A
+requirement with no implementation (e.g. "the modal closes on Esc" while there is
+no handler in the code) is a finding.
 
-**C. ISSUE в трекере (Jira/YouTrack/GitHub/Linear: ID или ссылка).** Получи
-текст issue через доступную интеграцию (MCP-инструмент, если подключён; иначе
-запроси текст у пользователя, не додумывай). Найди связанные коммиты
-(`git log --all --grep=<ID> --oneline`, затем `git show --stat`), построй список
-затронутых экранов/компонентов.
+**C. ISSUE in a tracker (Jira/YouTrack/GitHub/Linear: ID or link).** Get the issue
+text via an available integration (an MCP tool, if connected; otherwise ask the
+user for the text — do not make it up). Find the related commits
+(`git log --all --grep=<ID> --oneline`, then `git show --stat`), and build the
+list of affected screens/components.
 
-Если периметр не определяется однозначно — остановись и уточни у автора задачи,
-не проверяй наугад весь фронтенд. Зафиксируй итоговый SCOPE (экраны, URL,
-файлы, компоненты) в начале отчёта.
+If the scope cannot be determined unambiguously — stop and check with the task
+author; do not check the whole frontend at random. Record the final SCOPE (screens,
+URLs, files, components) at the start of the report.
 
-## КЛЮЧЕВОЙ ПРИНЦИП: ПРОВЕРЯЙ ВЖИВУЮ, А НЕ ПО КОДУ
+## KEY PRINCIPLE: CHECK IT LIVE, NOT FROM THE CODE
 
-Наличие атрибута в разметке ≠ доступность на практике. Проверяй адверсариально:
+An attribute being present in the markup ≠ accessibility in practice. Check
+adversarially:
 
-1. `aria-label` есть в JSX — но проверь, что скринридер реально его объявляет и
-   что он не дублируется/не конфликтует с видимым текстом («button button»,
-   двойное объявление).
-2. `alt` проставлен — но проверь, осмысленный ли он (не `alt="image"`,
-   не `alt="1.jpg"`), и что у декоративных изображений `alt=""` (пустой), а не
-   отсутствует.
-3. Контраст «выглядит нормально» — измерь реальные вычисленные цвета
-   (getComputedStyle / пипетка), включая состояния hover/focus/disabled и текст
-   поверх фонового изображения/градиента.
-4. «Фокус виден» — проверь на КАЖДОМ интерактивном элементе при навигации
-   Tab, а не на одном. Частая дыра — глобальный `outline: none` без замены.
-5. «Модалка доступна» — проверь весь цикл: фокус ушёл внутрь при открытии,
-   заперт внутри (focus trap), Esc закрывает, фокус вернулся на триггер.
-6. Не доверяй результату одного автосканера: axe/Lighthouse ловят ~30–40%
-   проблем WCAG, остальное — только ручной прогон (логичность порядка фокуса,
-   осмысленность alt, корректность live-region). Формулируй статус явно:
-   «не соответствует» / «соответствует формально (атрибут есть, эффекта нет)» /
-   «соответствует».
+1. `aria-label` is present in the JSX — but verify that the screen reader actually
+   announces it and that it does not duplicate/conflict with the visible text
+   ("button button", a double announcement).
+2. `alt` is set — but verify it is meaningful (not `alt="image"`, not
+   `alt="1.jpg"`), and that decorative images have `alt=""` (empty) rather than
+   missing it.
+3. Contrast "looks fine" — measure the actual computed colors (getComputedStyle /
+   an eyedropper), including hover/focus/disabled states and text over a background
+   image/gradient.
+4. "Focus is visible" — check it on EVERY interactive element while tabbing, not on
+   one. A common hole is a global `outline: none` with no replacement.
+5. "The modal is accessible" — check the whole cycle: focus moved inside on open,
+   is trapped inside (focus trap), Esc closes it, focus returned to the trigger.
+6. Do not trust the result of a single automated scanner: axe/Lighthouse catch
+   ~30–40% of WCAG issues; the rest require a manual run only (logical focus order,
+   meaningful alt, correct live-region behavior). State the status explicitly:
+   "does not conform" / "formally conforms (attribute present, no effect)" /
+   "conforms".
 
-## МЕТОДОЛОГИЯ: ТРИ НЕЗАВИСИМЫХ СРЕЗА (в границах SCOPE)
+## METHODOLOGY: THREE INDEPENDENT PASSES (within the SCOPE)
 
-### СРЕЗ 1 — Автоматизированное сканирование
-Прогони доступные автосканеры по URL/страницам из SCOPE (используй те, что уже
-есть в проекте или устанавливаются штатно):
-- **axe-core** (через `@axe-core/cli`, расширение axe DevTools, или инъекцией
-  axe в запущенную страницу через браузерный инструмент и вызовом `axe.run()`);
-- **Lighthouse** раздел Accessibility (`lighthouse <url> --only-categories=accessibility`);
-- **pa11y** (`pa11y <url>`), **WAVE** — если доступны.
-Автосканер даёт стартовый список, а не финал. Каждую его находку подтверди
-вручную (СРЕЗ 2), false positive — отсей.
+### PASS 1 — Automated scanning
+Run the available automated scanners over the URLs/pages from the SCOPE (use the
+ones already present in the project or installed the standard way):
+- **axe-core** (via `@axe-core/cli`, the axe DevTools extension, or by injecting
+  axe into the running page through the browser tool and calling `axe.run()`);
+- **Lighthouse** Accessibility section
+  (`lighthouse <url> --only-categories=accessibility`);
+- **pa11y** (`pa11y <url>`), **WAVE** — if available.
+An automated scanner gives a starting list, not a final one. Confirm each of its
+findings manually (PASS 2), and filter out false positives.
 
-### СРЕЗ 2 — Ручной построчный разбор кода
-Пройди файлы из SCOPE построчно, применяя чек-лист POUR ниже. Для каждой
-потенциальной проблемы зафиксируй file:line и WCAG-критерий, затем проверь её в
-СРЕЗЕ 3.
+### PASS 2 — Manual line-by-line code review
+Go through the SCOPE files line by line, applying the POUR checklist below. For
+each potential problem, record file:line and the WCAG criterion, then verify it in
+PASS 3.
 
-### СРЕЗ 3 — ЖИВОЙ прогон в браузере (обязателен)
-Реально подними приложение и проверь в браузере через Claude Browser MCP.
-- Подними dev-сервер проекта (`npm run dev` / `pnpm dev` / штатная команда из
-  README/package.json) и открой нужный URL, либо используй уже запущенный
-  стенд/staging, если он указан.
-- **Клавиатура**: пройди весь экран только Tab/Shift+Tab/Enter/Space/стрелки.
-  Проверь: все интерактивные элементы достижимы, порядок логичный, нет keyboard
-  trap, видимый focus indicator на каждом шаге, кастомные виджеты
-  (дропдаун/таб/слайдер/дейтпикер) управляются клавиатурой по ожидаемому
-  паттерну (WAI-ARIA Authoring Practices).
-- **Фокус в модалках/поповерах**: открытие → фокус внутрь, trap, Esc, возврат.
-- **Контраст**: измерь вычисленные цвета ключевых текстов и UI-контролов
-  (можно через `getComputedStyle` в консоли браузера или зум-скриншот +
-  расчёт), включая состояния.
-- **Скринридер / accessibility tree**: сними дерево доступности страницы
-  (`read_page` даёт роли/имена элементов — это по сути то, что «слышит»
-  скринридер) и проверь, что у каждого контрола есть корректные role + accessible
-  name, заголовки образуют иерархию, есть landmarks. Где возможно — прогони
-  реальный скринридер (NVDA/Voiceover/Orca).
-- **Масштаб/reflow**: 200% зум и узкий вьюпорт (эмулируй resize до ~320px) —
-  контент не обрезается, не появляется горизонтальный скролл, ничего не
-  перекрывается (WCAG 1.4.10, 1.4.4).
-- **prefers-reduced-motion**: включи эмуляцию и проверь, что анимации/автоплей
-  уважают настройку (WCAG 2.3.3).
-Зафиксируй, что реально проверено вживую, а что нет (нет реального скринридера,
-headless-окружение и т.п.) — в раздел «что не проверено».
+### PASS 3 — LIVE run in the browser (mandatory)
+Actually bring up the app and check it in the browser via the Claude Browser MCP.
+- Bring up the project dev server (`npm run dev` / `pnpm dev` / the standard command
+  from the README/package.json) and open the needed URL, or use an already-running
+  environment/staging if one is specified.
+- **Keyboard**: go through the entire screen using only Tab/Shift+Tab/Enter/Space/
+  arrows. Check: all interactive elements are reachable, the order is logical, there
+  is no keyboard trap, a visible focus indicator is present at every step, and
+  custom widgets (dropdown/tabs/slider/datepicker) are keyboard-operable following
+  the expected pattern (WAI-ARIA Authoring Practices).
+- **Focus in modals/popovers**: open → focus moves inside, trap, Esc, return.
+- **Contrast**: measure the computed colors of key text and UI controls (via
+  `getComputedStyle` in the browser console or a zoom screenshot + calculation),
+  including states.
+- **Screen reader / accessibility tree**: capture the page's accessibility tree
+  (`read_page` gives element roles/names — essentially what a screen reader
+  "hears") and verify that every control has a correct role + accessible name, that
+  headings form a hierarchy, and that landmarks are present. Where possible, run a
+  real screen reader (NVDA/Voiceover/Orca).
+- **Zoom/reflow**: 200% zoom and a narrow viewport (emulate resize down to ~320px)
+  — content is not clipped, no horizontal scroll appears, nothing overlaps (WCAG
+  1.4.10, 1.4.4).
+- **prefers-reduced-motion**: turn on the emulation and verify that animations/
+  autoplay respect the setting (WCAG 2.3.3).
+Record what was actually verified live and what was not (no real screen reader, a
+headless environment, etc.) — in the "what was not checked" section.
 
-## ЧЕК-ЛИСТ ПО ПРИНЦИПАМ POUR (применяй блоки, релевантные SCOPE)
+## CHECKLIST BY POUR PRINCIPLE (apply the blocks relevant to the SCOPE)
 
-### P — Perceivable (воспринимаемость)
-1. **Текстовые альтернативы (1.1.1)**: у каждого информативного `<img>`/иконки/
-   `<svg>`/canvas/графика — осмысленный `alt`/`aria-label`; у декоративных —
-   `alt=""`/`aria-hidden="true"`. Кнопка-иконка без текста имеет accessible name.
-2. **Контраст текста (1.4.3, AA)**: обычный текст ≥ 4.5:1, крупный (≥18pt или
-   ≥14pt bold) ≥ 3:1. **Измеряй**, не оценивай на глаз. Проверь placeholder,
-   disabled-состояния, текст на градиенте/картинке.
-3. **Контраст нетекстовых элементов (1.4.11, AA)**: границы инпутов, иконки-
-   контролы, индикатор фокуса, состояния — ≥ 3:1 к соседнему цвету.
-4. **Цвет не единственный носитель смысла (1.4.1)**: ошибка/статус/ссылка
-   различимы не только цветом (иконка, подчёркивание, текст).
-5. **Reflow (1.4.10) и изменение размера текста (1.4.4)**: контент работает при
-   200% и на 320px без потери информации и горизонтального скролла.
-6. **Медиа**: у видео — субтитры (1.2.2), у аудио — транскрипт; нет автоплея
-   звука дольше 3с без контрола (1.4.2).
+### P — Perceivable
+1. **Text alternatives (1.1.1)**: every informative `<img>`/icon/`<svg>`/canvas/
+   graphic has a meaningful `alt`/`aria-label`; decorative ones have
+   `alt=""`/`aria-hidden="true"`. An icon button with no text has an accessible
+   name.
+2. **Text contrast (1.4.3, AA)**: normal text ≥ 4.5:1, large text (≥18pt or ≥14pt
+   bold) ≥ 3:1. **Measure**, don't eyeball. Check placeholder, disabled states,
+   text over a gradient/image.
+3. **Non-text contrast (1.4.11, AA)**: input borders, control icons, the focus
+   indicator, states — ≥ 3:1 against the adjacent color.
+4. **Color is not the only carrier of meaning (1.4.1)**: an error/status/link is
+   distinguishable by more than color (icon, underline, text).
+5. **Reflow (1.4.10) and text resizing (1.4.4)**: content works at 200% and at
+   320px with no loss of information and no horizontal scroll.
+6. **Media**: video has captions (1.2.2), audio has a transcript; no audio autoplay
+   longer than 3s without a control (1.4.2).
 
-### O — Operable (управляемость)
-7. **Клавиатурная доступность (2.1.1)**: вся функциональность достижима с
-   клавиатуры; кастомные интерактивные элементы имеют `tabindex="0"` и
-   обработчики клавиш, а не только `onClick` на `<div>`.
-8. **Нет keyboard trap (2.1.2)**: из любого элемента можно выйти клавиатурой.
-9. **Видимый фокус (2.4.7, AA)**: focus indicator присутствует и контрастен;
-   нет `outline:none` без адекватной замены.
-10. **Порядок фокуса (2.4.3)**: соответствует визуальному/логическому; нет
-    положительных `tabindex` > 0, ломающих порядок.
-11. **Skip-link / bypass blocks (2.4.1)**: есть способ пропустить повторяющуюся
-    навигацию на страницах с большим меню.
-12. **Заголовок страницы и цель ссылки (2.4.2, 2.4.4)**: `<title>` осмыслен;
-    текст ссылки понятен вне контекста (не «читать далее» × 10 одинаковых).
-13. **Таргеты касания (2.5.8 AA в 2.2 / 2.5.5)**: интерактивные цели достаточного
-    размера (ориентир ≥ 24×24 CSS-px, лучше 44×44) и не впритык друг к другу.
-14. **Тайминги (2.2.1)**: если есть таймауты/автологаут — их можно продлить/
-    отключить. Автообновляющийся контент можно поставить на паузу (2.2.2).
-15. **Анимации/мигание (2.3.1, 2.3.3)**: нет мигания > 3 раз/с; motion уважает
+### O — Operable
+7. **Keyboard accessibility (2.1.1)**: all functionality is reachable from the
+   keyboard; custom interactive elements have `tabindex="0"` and key handlers, not
+   just an `onClick` on a `<div>`.
+8. **No keyboard trap (2.1.2)**: you can leave any element via the keyboard.
+9. **Visible focus (2.4.7, AA)**: a focus indicator is present and has contrast;
+   no `outline:none` without an adequate replacement.
+10. **Focus order (2.4.3)**: matches the visual/logical order; no positive
+    `tabindex` > 0 breaking the order.
+11. **Skip link / bypass blocks (2.4.1)**: there is a way to skip repeated
+    navigation on pages with a large menu.
+12. **Page title and link purpose (2.4.2, 2.4.4)**: `<title>` is meaningful; link
+    text makes sense out of context (not "read more" × 10 identical ones).
+13. **Touch targets (2.5.8 AA in 2.2 / 2.5.5)**: interactive targets are large
+    enough (rule of thumb ≥ 24×24 CSS px, better 44×44) and not crammed against
+    each other.
+14. **Timing (2.2.1)**: if there are timeouts/auto-logout — they can be
+    extended/turned off. Auto-updating content can be paused (2.2.2).
+15. **Animation/flashing (2.3.1, 2.3.3)**: no flashing > 3 times/s; motion respects
     `prefers-reduced-motion`.
 
-### U — Understandable (понятность)
-16. **Язык страницы (3.1.1)**: `<html lang="...">` задан и корректен; блоки на
-    другом языке помечены `lang`.
-17. **Формы — метки (3.3.2, 1.3.1, 4.1.2)**: у каждого поля есть программно
-    связанный `<label for>`/`aria-labelledby` (не только placeholder);
-    обязательность и формат объявлены не только цветом/звёздочкой.
-18. **Ошибки форм (3.3.1, 3.3.3)**: ошибка идентифицирована текстом, связана с
-    полем (`aria-describedby`), объявляется скринридеру, есть подсказка по
-    исправлению.
-19. **Предсказуемость (3.2.1, 3.2.2)**: фокус/изменение значения поля не
-    вызывает неожиданной навигации/сабмита без предупреждения.
-20. **Согласованность (3.2.3, 3.2.4)**: одинаковые элементы названы/расположены
-    одинаково между экранами.
+### U — Understandable
+16. **Page language (3.1.1)**: `<html lang="...">` is set and correct; blocks in
+    another language are marked with `lang`.
+17. **Forms — labels (3.3.2, 1.3.1, 4.1.2)**: every field has a programmatically
+    associated `<label for>`/`aria-labelledby` (not just a placeholder);
+    required-ness and format are announced by more than color/an asterisk.
+18. **Form errors (3.3.1, 3.3.3)**: the error is identified by text, associated
+    with the field (`aria-describedby`), announced to the screen reader, and has a
+    hint on how to fix it.
+19. **Predictability (3.2.1, 3.2.2)**: focus / changing a field's value does not
+    cause unexpected navigation/submit without a warning.
+20. **Consistency (3.2.3, 3.2.4)**: identical elements are named/positioned the
+    same way across screens.
 
-### R — Robust (надёжность)
-21. **Валидный/семантичный HTML (4.1.1, 1.3.1)**: используются нативные
-    элементы (`<button>`, `<a>`, `<nav>`, `<main>`, `<ul>`) вместо `<div>`-ов с
-    ролями там, где нативное решает; нет дублирующихся `id`.
-22. **ARIA корректна (4.1.2)**: роли/состояния/свойства валидны и синхронны с
-    визуальным состоянием (`aria-expanded`, `aria-checked`, `aria-selected`,
-    `aria-disabled`); нет `role`, противоречащей тегу; ARIA не «поверх»
-    доступного нативного (первое правило ARIA — не использовать ARIA, если есть
-    нативный элемент).
-23. **Landmarks и иерархия заголовков (1.3.1)**: один `<h1>`, заголовки без
-    пропуска уровней, контент разложен по landmark-ролям (banner/nav/main/
-    contentinfo).
-24. **Динамические уведомления (4.1.3, AA)**: тосты/валидация/загрузка/счётчики
-    объявляются через `aria-live`/`role="status"`/`role="alert"` с корректной
-    вежливостью (polite/assertive).
+### R — Robust
+21. **Valid/semantic HTML (4.1.1, 1.3.1)**: native elements are used
+    (`<button>`, `<a>`, `<nav>`, `<main>`, `<ul>`) instead of `<div>`s with roles
+    where native solves it; no duplicate `id`s.
+22. **ARIA is correct (4.1.2)**: roles/states/properties are valid and in sync with
+    the visual state (`aria-expanded`, `aria-checked`, `aria-selected`,
+    `aria-disabled`); no `role` contradicting the tag; ARIA is not layered "on top
+    of" an accessible native element (the first rule of ARIA — don't use ARIA if a
+    native element exists).
+23. **Landmarks and heading hierarchy (1.3.1)**: a single `<h1>`, headings with no
+    skipped levels, content laid out into landmark roles
+    (banner/nav/main/contentinfo).
+24. **Dynamic notifications (4.1.3, AA)**: toasts/validation/loading/counters are
+    announced via `aria-live`/`role="status"`/`role="alert"` with the correct
+    politeness (polite/assertive).
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ
-- Кастомный дропдаун/автокомплит на `<div>`: мышью работает, с клавиатуры и
-  скринридером — нет (нет роли `listbox`/`option`, нет управления стрелками).
-- Модалка рендерится, но фокус остаётся на фоне; фон не помечен `aria-hidden`/
-  `inert`, скринридер «проваливается» за модалку.
-- Иконочная кнопка (гамбургер, крестик, шестерёнка) без accessible name —
-  скринридер читает «button» без смысла.
-- Placeholder используется вместо `<label>` — исчезает при вводе, не читается
-  как метка, часто не проходит по контрасту.
-- Тост/сообщение об успехе появляется визуально, но без `aria-live` — незрячий
-  не узнаёт, что действие выполнено.
-- `outline: none` в глобальных стилях/CSS-reset без замены — фокус невидим на
-  всём приложении.
-- Ошибки валидации подсвечены только красной рамкой — недоступно при
-  дальтонизме и для скринридера.
-- Focus indicator есть, но контраст самого индикатора < 3:1 (серый на белом).
-- Skeleton/loading без `aria-busy`/live-region — скринридер молчит во время
-  загрузки.
-- Таблица данных на `<div>`-грид без ролей `table/row/cell` — теряется
-  навигация по строкам/столбцам.
-- Порядок DOM не совпадает с визуальным из-за CSS (`order`, `flex-direction:
-  row-reverse`) — порядок фокуса нелогичен.
-- Тач-таргеты меньше 24px или вплотную (иконки действий в строке таблицы).
-- Контент, доступный только по hover (тултип, подменю), недостижим с клавиатуры
-  и на тач-устройствах (WCAG 1.4.13).
-- `aria-label` на элементе, у которого уже есть видимый текст, — переопределяет
-  и рассинхронизирует то, что видно и что слышно.
+## EDGE CASES THAT ARE OFTEN MISSED
+- A custom dropdown/autocomplete on a `<div>`: works with the mouse, but not with
+  the keyboard or screen reader (no `listbox`/`option` roles, no arrow-key control).
+- A modal renders, but focus stays on the background; the background is not marked
+  `aria-hidden`/`inert`, and the screen reader "falls through" behind the modal.
+- An icon button (hamburger, close, gear) with no accessible name — the screen
+  reader reads "button" with no meaning.
+- A placeholder used instead of a `<label>` — it disappears on input, is not read
+  as a label, and often fails contrast.
+- A toast/success message appears visually, but without `aria-live` — a blind user
+  never learns the action succeeded.
+- `outline: none` in global styles / a CSS reset with no replacement — focus is
+  invisible across the entire app.
+- Validation errors highlighted only with a red border — inaccessible for color
+  blindness and for the screen reader.
+- A focus indicator is present, but the indicator's own contrast is < 3:1 (gray on
+  white).
+- A skeleton/loading state with no `aria-busy`/live-region — the screen reader is
+  silent during loading.
+- A data table on a `<div>` grid with no `table/row/cell` roles — row/column
+  navigation is lost.
+- DOM order does not match the visual order because of CSS (`order`,
+  `flex-direction: row-reverse`) — the focus order is illogical.
+- Touch targets smaller than 24px or right next to each other (action icons in a
+  table row).
+- Content available only on hover (tooltip, submenu) is unreachable from the
+  keyboard and on touch devices (WCAG 1.4.13).
+- `aria-label` on an element that already has visible text — it overrides and
+  desyncs what is seen versus what is heard.
 
-## ШКАЛА SEVERITY
-Для каждой находки указывай WCAG success criterion (номер + уровень A/AA) и
-затронутую группу пользователей (незрячие/слабовидящие/дальтоники/моторика/
-когнитивные/глухие).
-- **Critical** — полностью блокирует выполнение задачи для группы пользователей
-  (например, оформить заказ невозможно с клавиатуры; форму нельзя заполнить
-  скринридером). Обычно нарушение уровня A.
-- **High** — серьёзно затрудняет, есть обходной путь ценой больших усилий, либо
-  нарушение AA-критерия на ключевом пути (низкий контраст основного текста,
-  невидимый фокус).
-- **Medium** — заметный барьер на второстепенном пути или для части сценариев
-  (неоптимальный порядок фокуса, отсутствие skip-link).
-- **Low** — нарушение best practice без прямого блокирования (избыточная ARIA,
-  неидеальный alt у второстепенной картинки).
+## SEVERITY SCALE
+For each finding, state the WCAG success criterion (number + level A/AA) and the
+affected user group (blind / low-vision / color-blind / motor / cognitive / deaf).
+- **Critical** — fully blocks task completion for a user group (e.g. placing an
+  order is impossible from the keyboard; a form cannot be filled out with a screen
+  reader). Usually a level-A violation.
+- **High** — seriously impedes it, a workaround exists only at great effort, or an
+  AA-criterion violation on a key path (low contrast of the main text, invisible
+  focus).
+- **Medium** — a noticeable barrier on a secondary path or for part of the
+  scenarios (suboptimal focus order, missing skip link).
+- **Low** — a best-practice violation with no direct blocking (redundant ARIA,
+  imperfect alt on a secondary image).
 
-Итоговый вердикт по уровню: соответствует WCAG 2.2 AA / соответствует A, но не
-AA / не соответствует (перечисли блокеры).
+Overall verdict by level: conforms to WCAG 2.2 AA / conforms to A but not AA / does
+not conform (list the blockers).
 
-## ФОРМАТ ОТЧЁТА
-1. **Executive summary** (без жаргона): может ли человек с инвалидностью
-   пользоваться этим экраном, что блокирует, какие юридические/этические риски
-   (доступность часто регулируется — EN 301 549, ADA, ГОСТ Р 52872), что чинить
-   первым.
-2. **SCOPE** — проверенные экраны/URL/файлы/компоненты и что осталось за
-   периметром и почему.
-3. **Вердикт одной фразой** в начале: «соответствует WCAG 2.2 AA» / «не
-   соответствует — N critical/high барьеров» / «соответствует с оговорками».
-4. **Матрица покрытия** — что проверено автосканером, что вручную по коду, что
-   живым прогоном (клавиатура/фокус/контраст/скринридер/зум/motion).
-5. **Список находок**: ID, file:line (и/или URL+селектор), WCAG-критерий
-   (номер+уровень), затронутая группа, сценарий («при навигации Tab фокус не
-   виден на кнопке X»), severity, рекомендация.
-6. **Что сделано хорошо** — сильные a11y-паттерны, которые стоит тиражировать.
-7. **План действий**: блокеры (critical/high до релиза) vs. отложенное
-   (medium/low с тикетом).
-8. **Что не проверено** — ограничения (нет реального скринридера, headless, не
-   удалось поднять приложение, не тестировались все состояния) — честно, чтобы
-   отсутствие находок не читалось как «всё доступно».
+## REPORT FORMAT
+1. **Executive summary** (no jargon): can a person with a disability use this
+   screen, what blocks them, what legal/ethical risks exist (accessibility is often
+   regulated — EN 301 549, ADA, GOST R 52872), what to fix first.
+2. **SCOPE** — the screens/URLs/files/components checked and what was left out of
+   scope and why.
+3. **One-line verdict** up front: "conforms to WCAG 2.2 AA" / "does not conform —
+   N critical/high barriers" / "conforms with caveats".
+4. **Coverage matrix** — what was checked by an automated scanner, what manually
+   from the code, what by a live run (keyboard/focus/contrast/screen reader/zoom/
+   motion).
+5. **List of findings**: ID, file:line (and/or URL+selector), WCAG criterion
+   (number+level), affected group, scenario ("while tabbing, focus is not visible
+   on button X"), severity, recommendation.
+6. **What was done well** — strong a11y patterns worth replicating.
+7. **Action plan**: blockers (critical/high before release) vs. deferred
+   (medium/low with a ticket).
+8. **What was not checked** — limitations (no real screen reader, headless, could
+   not bring up the app, not all states were tested) — honestly, so that an absence
+   of findings does not read as "everything is accessible".
 
-## ПРАВИЛА ОФОРМЛЕНИЯ НАХОДОК
-Перед началом проверь, нет ли уже отчёта по этому периметру в
-`docs/qa/accessibility/` — если есть, продолжи нумерацию ID и обнови статусы
-известных находок, а не пересоздавай.
-Для каждой находки обязательны:
-- Стабильный ID: `A11Y-<scope-slug>-001`.
-- file:line (и/или URL страницы + CSS-селектор/текст элемента).
-- WCAG success criterion: номер и уровень (например, «2.1.1 Keyboard (A)»,
-  «1.4.3 Contrast (Minimum) (AA)»).
-- Затронутая группа пользователей и способ взаимодействия.
-- Конкретный сценарий: «сделав X, пользователь Y не может Z» — не абстрактно.
-- Severity с обоснованием (блокирует / затрудняет / косметика).
-- Конкретная рекомендация («добавить `<label for="email">`», «заменить `<div
-  onClick>` на `<button>`», «поднять контраст текста #999 на #fff до ≥4.5:1»).
-Сохрани отчёт в `docs/qa/accessibility/<scope-slug>.md` (проверь существующую
-структуру репозитория; `docs/qa/...` — дефолт, если своей нет).
+## RULES FOR WRITING UP FINDINGS
+Before you start, check whether a report for this scope already exists in
+`docs/qa/accessibility/` — if so, continue the ID numbering and update the statuses
+of known findings rather than recreating it.
+For each finding, the following are mandatory:
+- A stable ID: `A11Y-<scope-slug>-001`.
+- file:line (and/or the page URL + CSS selector/element text).
+- WCAG success criterion: number and level (e.g. "2.1.1 Keyboard (A)", "1.4.3
+  Contrast (Minimum) (AA)").
+- The affected user group and the way of interacting.
+- A concrete scenario: "after doing X, user Y cannot Z" — not in the abstract.
+- Severity with justification (blocks / impedes / cosmetic).
+- A concrete recommendation ("add `<label for="email">`", "replace `<div onClick>`
+  with `<button>`", "raise the contrast of #999 text on #fff to ≥4.5:1").
+Save the report to `docs/qa/accessibility/<scope-slug>.md` (check the existing
+repository structure; `docs/qa/...` is the default if there is no own convention).
 
-## ЗАПУСК (практическая инструкция)
-1. САМ в основном потоке определи SCOPE (раздел «Входные данные») — не делегируй
-   этот шаг, субагент не видит контекст диалога. Определи стек фронтенда и как
-   поднять приложение; выясни URL проверяемых экранов.
-2. Проверь, нет ли предыдущего отчёта в `docs/qa/accessibility/`.
-3. Подними приложение (или используй указанный стенд) и открой нужные URL в
-   браузере через Claude Browser MCP — живой прогон обязателен, без него отчёт
-   неполон.
-4. Прогони СРЕЗ 1 (автосканеры axe/Lighthouse/pa11y по URL) — собери стартовый
-   список.
-5. Проведи СРЕЗ 2 (построчный разбор кода по POUR) и СРЕЗ 3 (живой прогон:
-   клавиатура, фокус, контраст, accessibility tree, зум 200%, motion). Если
-   экранов много и доступен Agent tool — раздели по экранам/зонам между
-   субагентами; каждому передай конкретные URL/пути, чек-лист POUR, шкалу
-   severity и формат находки (субагент не видит этот файл). Записывай
-   подтверждённые находки в промежуточный файл по мере разбора.
-6. Сведи три среза в отчёт, отсей false positive автосканера, но фиксируй и
-   автонаходку, и её ручное подтверждение, если это разные факты. Сохрани файл
-   в `docs/qa/accessibility/<scope-slug>.md`.
-7. Явно перечисли, что не проверено.
+## RUNNING IT (practical instructions)
+1. Determine the SCOPE YOURSELF in the main thread (see "Input") — do not delegate
+   this step; a subagent does not see the conversation context. Detect the frontend
+   stack and how to bring up the app; work out the URLs of the screens under review.
+2. Check whether a previous report exists in `docs/qa/accessibility/`.
+3. Bring up the app (or use the specified environment) and open the needed URLs in
+   the browser via the Claude Browser MCP — a live run is mandatory; without it the
+   report is incomplete.
+4. Run PASS 1 (automated scanners axe/Lighthouse/pa11y over the URLs) — collect the
+   starting list.
+5. Carry out PASS 2 (line-by-line code review by POUR) and PASS 3 (live run:
+   keyboard, focus, contrast, accessibility tree, 200% zoom, motion). If there are
+   many screens and the Agent tool is available — split it across subagents by
+   screen/zone; give each one the concrete URLs/paths, the POUR checklist, the
+   severity scale, and the finding format (the subagent does not see this file).
+   Write confirmed findings into an interim file as you go.
+6. Merge the three passes into the report, filter out the scanner's false
+   positives, but record both the automated finding and its manual confirmation if
+   they are different facts. Save the file to
+   `docs/qa/accessibility/<scope-slug>.md`.
+7. Explicitly list what was not checked.
 
-Это тестирование, а не имплементация: правки в разметку/стили вносит
-разработчик по итогам отчёта, не ты в рамках этого скилла.
+This is testing, not implementation: fixes to markup/styles are made by the
+developer based on the report, not by you within this skill.
+

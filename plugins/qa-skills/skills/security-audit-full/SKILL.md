@@ -1,502 +1,493 @@
 ---
 name: security-audit-full
-description: Полный аудит безопасности ВСЕГО репозитория the-platform (все backend-сервисы, the-frontend, встраиваемые виджеты/расширения, общие библиотеки libs/*, инфраструктурные конфиги helm/k8s/docker) — три независимых среза (автоматизированное сканирование SCA/SAST/secret-scan/IaC, построчный код-ревью по зонам, архитектурный обзор), детальный чек-лист по 14 категориям (auth/authz, мультитенантность, websocket, internal API, инъекции, SSRF, XSS, секреты/PII, файлы, зависимости, docker, k8s/helm, обработка ошибок, CI/CD), находки с file:line и сценарием эксплуатации, и итоговым отчётом для руководства. Используй когда просят провести полный аудит безопасности всей кодовой базы/репозитория/платформы целиком, найти уязвимости по всему проекту, перепроверить статус находок из предыдущего security-аудита, или оценить общую готовность платформы к обработке персональных данных клиентов с точки зрения безопасности — даже если пользователь не произносит слово "аудит" буквально, а говорит "давай проверим весь проект на дыры в безопасности", "насколько мы защищены от утечки данных между компаниями" и т.п. Это НЕ то же самое, что скилл `security-review` (тот делает быстрое ревью pending-изменений на текущей ветке в стиле обычного code review, без SCOPE на весь репозиторий, без трёх срезов и без формата аудиторского отчёта для руководства) — используй именно этот скилл, если нужен полноценный аудит. Если задача касается только одной фичи/ветки/PR/YouTrack-задачи, используй `security-audit-feature` вместо полного разбора всей кодовой базы.
-argument-hint: "[путь к отчёту предыдущего аудита, если это повторный аудит — опционально]"
+description: Full security audit of the ENTIRE the-platform repository (all backend services, the-frontend, embeddable widgets/extensions, shared libraries libs/*, infrastructure configs helm/k8s/docker) — three independent passes (automated scanning SCA/SAST/secret-scan/IaC, line-by-line code review by zone, architectural review), a detailed 14-category checklist (auth/authz, multi-tenancy, websocket, internal API, injections, SSRF, XSS, secrets/PII, files, dependencies, docker, k8s/helm, error handling, CI/CD), findings with file:line and an exploitation scenario, and a final report for leadership. Use when asked to run a full security audit of the whole codebase/repository/platform, to find vulnerabilities across the entire project, to re-verify the status of findings from a previous security audit, or to assess the platform's overall readiness to handle customer personal data from a security standpoint — even if the user doesn't say the word "audit" literally, but says "let's check the whole project for security holes", "how protected are we against data leaking between companies", etc. This is NOT the same as the `security-review` skill (which does a quick review of pending changes on the current branch in ordinary code-review style, with no SCOPE over the whole repository, no three passes, and no audit-report format for leadership) — use this skill specifically if you need a full audit. If the task concerns only one feature/branch/PR/YouTrack task, use `security-audit-feature` instead of a full review of the entire codebase.
+argument-hint: "[path to the previous audit report, if this is a re-audit — optional]"
 disallowed-tools: Edit
 ---
 
-# Полный аудит безопасности репозитория
+# Full repository security audit
 
-Для проекта the-platform: микросервисная CRM-платформа, обрабатывающая
-персональные данные клиентов. Безопасность — критический приоритет, а не
-формальность. Аудит должен находить реальные, эксплуатируемые проблемы с
-привязкой к file:line, а не составлять общий чек-лист без проверки. Каждая
-находка обязана быть подтверждена вручную, а не только упоминанием в выводе
-сканера.
+For the-platform project: a microservices CRM platform that processes
+customer personal data. Security is a critical priority, not a formality.
+The audit must find real, exploitable problems tied to file:line, not
+produce a generic checklist without verification. Every finding must be
+confirmed by hand, not merely mentioned in a scanner's output.
 
-## ВХОДНЫЕ ДАННЫЕ
+## INPUT
 
-`$ARGUMENTS` — необязательно путь к отчёту предыдущего аудита для сравнения
-"было → стало". Если не передан — ищи сам: реестр прошлых находок лежит в
-`docs/bugs/security_audit/` (по каждой находке зафиксирован вердикт:
-подтвердилась / false positive / уже исправлена), а регрессионная проверка
-по нему — `scripts/verify_audit_fixes.py`, если он есть в репозитории.
+`$ARGUMENTS` — optionally a path to the previous audit report for a "before →
+after" comparison. If not passed, look for it yourself: the registry of past
+findings lives in `docs/bugs/security_audit/` (each finding records a
+verdict: confirmed / false positive / already fixed), and the regression
+check over it is `scripts/verify_audit_fixes.py`, if present in the
+repository.
 
-Это аудит ВСЕГО репозитория. Если задача на самом деле касается только
-одной фичи/ветки/PR/YouTrack-задачи — используй `security-audit-feature`
-вместо полного разбора всей кодовой базы (иначе периметр окажется
-избыточным, а находки не будут привязаны к тому, что реально нужно
-проверить перед конкретным релизом).
+This is an audit of the WHOLE repository. If the task actually concerns only
+one feature/branch/PR/YouTrack task, use `security-audit-feature` instead of
+a full review of the entire codebase (otherwise the scope will be excessive
+and the findings will not be tied to what really needs checking before a
+specific release).
 
-## КЛЮЧЕВОЙ ПРИНЦИП: ВЕРИФИКАЦИЯ, А НЕ ДОВЕРИЕ
+## KEY PRINCIPLE: VERIFICATION, NOT TRUST
 
-Главная причина, по которой аудиты безопасности проваливаются, — принятие
-на веру того, что "исправление написано" эквивалентно "уязвимость закрыта".
-Это НЕ так. Проверяй каждый фикс адверсариально:
+The main reason security audits fail is taking it on faith that "the fix was
+written" is equivalent to "the vulnerability is closed". It is NOT. Verify
+every fix adversarially:
 
-1. Если добавлена проверка (флаг, HMAC-подпись, экранирование, авторизация)
-   — убедись, что она ВКЛЮЧЕНА по умолчанию и активна во всех окружениях
-   (dev/staging/prod), а не только реализована в коде и выключена флагом.
-2. Если добавлено экранирование ввода — проверь ПОЛНОТУ: экранированы ли
-   все спецсимволы (одиночная кавычка, двойная кавычка, обратный слэш,
-   null-байт, юникод-обход), а не только очевидный случай. Одна незакрытая
-   дыра в экранировании = уязвимость не закрыта.
-3. Если защита (auth-секрет, middleware, RBAC-фильтр) применена к одному
-   эндпоинту/сервису — проверь ВЕСЬ класс однотипных эндпоинтов/сервисов.
-   Точечный фикс без покрытия всего класса — это не фикс, а иллюзия фикса.
-   Ищи "братьев и сестёр" уязвимого паттерна по всей кодовой базе (grep по
-   сигнатуре, а не по имени функции).
-4. Если в коде есть RBAC/switch/if-else по ролям — всегда проверяй ветку
-   "иначе" (default case). Отсутствие else-ветки с явным отказом в доступе
-   — это разрешение по умолчанию, то есть дыра.
-5. Не принимай объяснение "это устаревшая версия" или "это уже поправлено"
-   без самостоятельной проверки текущего состояния репозитория. Если раньше
-   был отчёт с найденными рисками — перепроверь каждый пункт по текущему
-   коду, независимо от того, что утверждает команда. Начни сверку с
-   `docs/bugs/security_audit/`, а не с чистого листа, и прогони
-   `scripts/verify_audit_fixes.py` для регрессионной проверки, если он
-   есть. Если новая находка фактически совпадает с уже трекнутым и
-   осознанно принятым там риском (например, отключённый networkPolicy,
-   одна реплика для HA-компонента) — сошлись на существующий файл вместо
-   дубликата, и отметь отдельно только если текущее изменение делает риск
-   хуже, чем он был зафиксирован.
-6. Формулируй разницу между статусами явно: "не исправлено" / "исправлено
-   формально (код есть, защиты нет)" / "исправлено выборочно (часть класса
-   покрыта)" / "исправлено полностью" / "новая находка".
+1. If a check was added (a flag, an HMAC signature, escaping, authorization),
+   make sure it is ENABLED by default and active in all environments
+   (dev/staging/prod), not merely implemented in code and turned off by a
+   flag.
+2. If input escaping was added, verify COMPLETENESS: are all special
+   characters escaped (single quote, double quote, backslash, null byte,
+   unicode bypass), not just the obvious case? A single unclosed hole in the
+   escaping = the vulnerability is not closed.
+3. If a protection (an auth secret, middleware, an RBAC filter) is applied to
+   one endpoint/service, check the ENTIRE class of same-type
+   endpoints/services. A pinpoint fix without covering the whole class is not
+   a fix but an illusion of one. Hunt for the "siblings" of the vulnerable
+   pattern across the whole codebase (grep by the signature, not by the
+   function name).
+4. If the code has RBAC/switch/if-else on roles, always check the "else"
+   branch (default case). The absence of an else branch with an explicit
+   access denial is an allow-by-default, i.e. a hole.
+5. Do not accept the explanation "that's an outdated version" or "that's
+   already fixed" without independently verifying the current state of the
+   repository. If there was a prior report of found risks, re-verify each
+   item against the current code, regardless of what the team claims. Start
+   the reconciliation from `docs/bugs/security_audit/`, not from a blank page,
+   and run `scripts/verify_audit_fixes.py` for the regression check, if
+   present. If a new finding effectively coincides with a risk already
+   tracked and deliberately accepted there (e.g. a disabled networkPolicy, a
+   single replica for an HA component), reference the existing file instead of
+   a duplicate, and note it separately only if the current change makes the
+   risk worse than it was recorded.
+6. State the difference between statuses explicitly: "not fixed" / "fixed on
+   paper (code exists, no protection)" / "fixed selectively (part of the
+   class covered)" / "fully fixed" / "new finding".
 
-## МЕТОДОЛОГИЯ: ТРИ НЕЗАВИСИМЫХ СРЕЗА
+## METHODOLOGY: THREE INDEPENDENT PASSES
 
-Проведи аудит тремя независимыми методами и не позволяй одному срезу
-подменять другой — у них разная слепая зона.
+Run the audit by three independent methods and do not let one pass substitute
+for another — they have different blind spots.
 
-### СРЕЗ 1 — Автоматизированное сканирование
+### PASS 1 — Automated scanning
 
-- **Зависимости (SCA)**: pip-audit/safety для Python-сервисов, npm audit
-  для фронтенда и Node-сервисов, grype и/или trivy fs/image для всех
-  манифестов зависимостей и Docker-образов. Зафиксируй разбивку
-  critical/high/medium/low и версии пакетов.
-- **Секреты в репозитории**: gitleaks или trufflehog по ПОЛНОЙ истории git
-  (не только по HEAD — секреты, once committed, остаются в истории даже
-  после удаления файла), плюс trivy secret-scanner по рабочему дереву.
-  Явно укажи, какие директории/пути сканер НЕ покрыл (исключения в
-  конфиге сканера, submodule, генерируемые артефакты) — "0 находок" по
-  непокрытой директории не является доказательством отсутствия секретов.
-- **SAST**: semgrep (правила для Python/JS/TS: injection, ssrf, insecure
-  deserialization, hardcoded secrets, weak crypto) и/или bandit для Python.
-- **IaC/Kubernetes**: checkov и/или kube-linter по всем helm-чартам и
-  манифестам — networkPolicy, securityContext, resources,
-  readOnlyRootFilesystem, capabilities, image tags (:latest запрещён),
+- **Dependencies (SCA)**: pip-audit/safety for Python services, npm audit for
+  the frontend and Node services, grype and/or trivy fs/image for all
+  dependency manifests and Docker images. Record the critical/high/medium/low
+  breakdown and package versions.
+- **Secrets in the repository**: gitleaks or trufflehog over the FULL git
+  history (not just HEAD — secrets, once committed, remain in history even
+  after the file is deleted), plus the trivy secret-scanner on the working
+  tree. Explicitly state which directories/paths the scanner did NOT cover
+  (exclusions in the scanner config, submodules, generated artifacts) — "0
+  findings" on an uncovered directory is not proof that no secrets are
+  present.
+- **SAST**: semgrep (rules for Python/JS/TS: injection, ssrf, insecure
+  deserialization, hardcoded secrets, weak crypto) and/or bandit for Python.
+- **IaC/Kubernetes**: checkov and/or kube-linter on all helm charts and
+  manifests — networkPolicy, securityContext, resources,
+  readOnlyRootFilesystem, capabilities, image tags (:latest forbidden),
   privileged containers, hostPath/hostNetwork.
-- **Container security**: trivy image по каждому собираемому образу — CVE
-  в базовом образе, отсутствие USER (root по умолчанию), лишние пакеты.
+- **Container security**: trivy image on every built image — CVEs in the base
+  image, missing USER (root by default), unnecessary packages.
 
-### СРЕЗ 2 — Ручной построчный разбор кода
+### PASS 2 — Manual line-by-line code review
 
-Раздели кодовую базу на независимые зоны и разбери КАЖДУЮ построчно (не по
-диагонали, не полагаясь только на grep-паттерны):
+Split the codebase into independent zones and review EACH line by line (not
+diagonally, not relying only on grep patterns):
 
-- Каждый backend-сервис отдельно (gateway, все `*-service` директории в
+- Each backend service separately (gateway, all `*-service` directories in
   `services/`).
-- Frontend/SPA (`the-frontend` и любые другие клиентские приложения).
-- Браузерные расширения/встраиваемые виджеты (chat-widget и т.п.) — код
-  выполняется на стороне клиента ВНЕ вашего периметра, любая XSS там видна
-  конечным пользователям ваших клиентов, это репутационный и регуляторный
-  риск, а не только внутренний техдолг.
-- Инфраструктурные конфиги (`helm/`, k8s-манифесты, docker-compose,
-  CI/CD пайплайны).
-- Общие библиотеки (`libs/shared_auth`, `libs/shared_metrics` и аналоги) —
-  проверь, подключены ли они как единый пакет или скопированы по сервисам
-  (если скопированы — зафиксируй как архитектурный риск: патч безопасности
-  не распространяется автоматически).
+- Frontend/SPA (`the-frontend` and any other client applications).
+- Browser extensions/embeddable widgets (chat-widget, etc.) — the code runs
+  on the client side OUTSIDE your perimeter, and any XSS there is visible to
+  the end users of your customers; this is a reputational and regulatory risk,
+  not merely internal tech debt.
+- Infrastructure configs (`helm/`, k8s manifests, docker-compose, CI/CD
+  pipelines).
+- Shared libraries (`libs/shared_auth`, `libs/shared_metrics`, and analogues)
+  — check whether they are wired in as a single package or copied across
+  services (if copied, record it as an architectural risk: a security patch
+  does not propagate automatically).
 
-По каждой зоне ищи (детальный чек-лист ниже) и для каждой находки указывай:
-file:line, тип уязвимости, конкретный сценарий эксплуатации (не абстрактно
-"может быть уязвимость", а "запрос X с параметром Y даёт результат Z"),
-severity, статус (см. выше).
+For each zone, look for (detailed checklist below) and for each finding
+record: file:line, vulnerability type, a concrete exploitation scenario (not
+an abstract "there may be a vulnerability", but "request X with parameter Y
+yields result Z"), severity, status (see above).
 
-### СРЕЗ 3 — Архитектурный обзор
+### PASS 3 — Architectural review
 
-Независимо от построчного разбора оцени, способна ли текущая архитектура
-УДЕРЖИВАТЬ безопасность со временем, а не только не иметь дыр сегодня:
+Independently of the line-by-line review, assess whether the current
+architecture can HOLD security over time, not just be free of holes today:
 
-- Размер файлов и смешение слоёв (HTTP + SQL + бизнес-логика + RBAC в одном
-  файле — ревьюить и тестировать такое практически невозможно, дефекты
-  систематически проходят).
-- Количество механизмов межсервисной коммуникации (чем больше разных
-  способов вызова — тем меньше шансов на единую точку внедрения политики
-  авторизации).
-- Дублирование общих библиотек безопасности по сервисам вместо единого
-  пакета.
-- Наличие/отсутствие процесса: обязательное код-ревью перед мержем,
-  блокирующий security-гейт в CI, независимая проверка закрытия предыдущих
-  находок (не по самоотчёту команды).
-- Небезопасные значения по умолчанию как системный паттерн (если один флаг
-  выключен по умолчанию — проверь, не системная ли это практика: другие
-  флаги/фичи безопасности в проекте тоже выключены по умолчанию?).
+- File size and layer mixing (HTTP + SQL + business logic + RBAC in one file
+  — reviewing and testing that is practically impossible, and defects
+  systematically slip through).
+- The number of inter-service communication mechanisms (the more different
+  ways to make a call, the lower the chance of a single point to enforce an
+  authorization policy).
+- Duplication of shared security libraries across services instead of a
+  single package.
+- Presence/absence of a process: mandatory code review before merge, a
+  blocking security gate in CI, an independent verification that previous
+  findings are closed (not by the team's self-report).
+- Insecure defaults as a systemic pattern (if one flag is off by default,
+  check whether this is a systemic practice: are other security
+  flags/features in the project also off by default?).
 
-## ДЕТАЛЬНЫЙ ЧЕК-ЛИСТ ПО КАТЕГОРИЯМ
+## DETAILED CATEGORY CHECKLIST
 
-1. **Аутентификация и авторизация**
-   - Все ли эндпоинты, требующие аутентификации, её действительно проверяют
-     (нет ли "забытых" открытых маршрутов, особенно /public/*, /internal/*,
+1. **Authentication and authorization**
+   - Do all endpoints that require authentication actually verify it (are
+     there "forgotten" open routes, especially /public/*, /internal/*,
      /health, /debug)?
-   - Саморегистрация: какая роль выдаётся по умолчанию? is_active=True
-     сразу или через подтверждение (email/admin approval)? Может ли внешний
-     человек через саморегистрацию получить доступ к чужим данным?
-   - RBAC/фильтрация по ролям: для КАЖДОЙ ветки ролей — что происходит для
-     роли, не попавшей ни в одну явную ветку (default/else)? Приводит ли
-     это к утечке данных (например, отсутствие фильтра по
-     assigned_user_id/owner_id)?
-   - Заголовки-контексты пользователя (X-User-Context и аналоги): подписаны
-     ли криптографически? Проверяется ли подпись на приёме, ВКЛЮЧЕНА ли эта
-     проверка по умолчанию во всех сервисах, которые доверяют этому
-     заголовку?
-   - IDOR/BOLA: можно ли, меняя ID в URL/body, получить доступ к чужим
-     объектам (контакты, сделки, файлы, диалоги)?
-   - Broken function level authorization: доступны ли админские операции
-     (массовое удаление, экспорт, wipe-data) без проверки роли?
-   - Session/token management: где хранятся токены (localStorage vs
-     httpOnly cookie), есть ли инвалидация при логауте/смене пароля, есть
-     ли ограничение по времени жизни.
-   - Хранение паролей: алгоритм хеширования (bcrypt/argon2 vs md5/sha1),
-     наличие соли, work factor. Есть ли MFA/2FA хотя бы для админских
-     ролей.
-   - CORS: `Access-Control-Allow-Origin` не равен `*` вместе с
-     `Allow-Credentials: true`; Origin из запроса не отражается в ответ без
-     сверки с allow-list.
-   - Rate limiting/брутфорс-защита на login, сброс пароля, OTP/2FA-коды —
-     есть ли лимит попыток и блокировка/задержка при превышении.
-   - Mass assignment/over-posting: принимает ли API произвольные поля тела
-     запроса (role, is_admin, company_id, balance и т.п.) при
-     create/update, или список разрешённых полей — explicit whitelist.
+   - Self-registration: which role is granted by default? is_active=True
+     immediately or via confirmation (email/admin approval)? Can an external
+     person gain access to someone else's data through self-registration?
+   - RBAC/role-based filtering: for EACH role branch — what happens for a role
+     that falls into no explicit branch (default/else)? Does this lead to data
+     leakage (e.g. no filter by assigned_user_id/owner_id)?
+   - User context headers (X-User-Context and analogues): are they
+     cryptographically signed? Is the signature verified on receipt, and is
+     this verification ENABLED by default in all services that trust the
+     header?
+   - IDOR/BOLA: can you access someone else's objects (contacts, deals, files,
+     dialogs) by changing an ID in the URL/body?
+   - Broken function level authorization: are admin operations (bulk delete,
+     export, wipe-data) accessible without a role check?
+   - Session/token management: where are tokens stored (localStorage vs
+     httpOnly cookie), is there invalidation on logout/password change, is
+     there a lifetime limit?
+   - Password storage: the hashing algorithm (bcrypt/argon2 vs md5/sha1),
+     presence of a salt, work factor. Is there MFA/2FA at least for admin
+     roles?
+   - CORS: `Access-Control-Allow-Origin` not equal to `*` together with
+     `Allow-Credentials: true`; the request Origin not reflected into the
+     response without checking against an allow-list.
+   - Rate limiting/brute-force protection on login, password reset, OTP/2FA
+     codes — is there a limit on attempts and a lockout/delay on exceeding it?
+   - Mass assignment/over-posting: does the API accept arbitrary request-body
+     fields (role, is_admin, company_id, balance, etc.) on create/update, or
+     is the list of allowed fields an explicit whitelist?
 
-2. **Мультитенантность (изоляция между компаниями-клиентами)** — это SaaS
-   CRM с несколькими компаниями-клиентами на общей инфраструктуре; утечка
-   данных МЕЖДУ компаниями тяжелее по последствиям, чем IDOR внутри одной
-   компании (регуляторный риск, доверие сразу всех клиентов платформы),
-   поэтому разбирай отдельно от общего IDOR-пункта выше, а не как его
-   частный случай.
-   - Для КАЖДОЙ точки чтения/записи данных (REST-хендлер, WebSocket-
-     подписка, кэш-ключ, поисковый индекс, очередь событий, экспорт/отчёт)
-     — фильтруется ли она по company_id/tenant_id на уровне запроса к БД
-     (WHERE company_id = ...), а не только проверкой на уровне UI/роутера.
-   - Совпадение company_id проверяется явно (сравнение значения из
-     токена/контекста с company_id самой записи), а не подразумевается тем,
-     что "запрос и так идёт из авторизованной сессии".
-   - Массовые операции, экспорт, аналитика/дашборды — не пересчитывают ли
-     они агрегаты по всем компаниям вместо своей.
-   - Общие ресурсы между сервисами (Redis-ключи, RabbitMQ-очереди,
-     файловое хранилище) — не может ли ключ/имя коллизировать между
-     разными компаниями при одинаковых внутренних ID (например, contact_id
-     уникален внутри компании, но не глобально).
+2. **Multi-tenancy (isolation between customer companies)** — this is a SaaS
+   CRM with several customer companies on shared infrastructure; a data leak
+   BETWEEN companies is heavier in consequences than an IDOR within one
+   company (a regulatory risk, the trust of all platform customers at once),
+   so review it separately from the generic IDOR item above, not as a special
+   case of it.
+   - For EACH data read/write point (REST handler, WebSocket subscription,
+     cache key, search index, event queue, export/report) — is it filtered by
+     company_id/tenant_id at the DB-query level (WHERE company_id = ...), not
+     only checked at the UI/router level?
+   - Is the company_id match checked explicitly (comparing the value from the
+     token/context against the record's own company_id), rather than assumed
+     because "the request comes from an authorized session anyway"?
+   - Bulk operations, exports, analytics/dashboards — do they recompute
+     aggregates across all companies instead of just their own?
+   - Shared resources between services (Redis keys, RabbitMQ queues, file
+     storage) — can a key/name collide between different companies given
+     identical internal IDs (e.g. contact_id is unique within a company but
+     not globally)?
 
 3. **WebSocket / realtime**
-   - Проверяется ли токен/роль/company_id при установке соединения
-     (connect), И отдельно — при каждой подписке на канал/комнату/диалог
-     (join), а не только один раз на connect.
-   - Может ли клиент подписаться на чужой канал, подставив/угадав room-id,
-     dialog-id, user-id, если сервер не сверяет владельца канала с текущим
-     пользователем.
-   - Рассылка событий (broadcast) — фильтруется ли получатель по
-     company_id/роли перед отправкой, или сервер полагается на то, что
-     клиент "просто не подписан" на чужие данные.
+   - Is the token/role/company_id checked at connection establishment
+     (connect), AND separately at each subscription to a channel/room/dialog
+     (join), not just once at connect?
+   - Can a client subscribe to someone else's channel by supplying/guessing a
+     room-id, dialog-id, user-id, if the server does not check the channel
+     owner against the current user?
+   - Event broadcast — is the recipient filtered by company_id/role before
+     sending, or does the server rely on the client "just not being
+     subscribed" to someone else's data?
 
-4. **Internal-API между сервисами**
-   - Пройдись по ВСЕМ `/internal/*` эндпоинтам во ВСЕХ сервисах и построй
-     таблицу: сервис | эндпоинт | требует ли shared-secret/mTLS |
-     проверяется ли этот секрет фактически (а не только объявлен в
-     переменных окружения). Ищи расхождения — один и тот же класс операций
-     (send-message, delete-by-id, wipe-data, sync) защищённый в одном
-     сервисе и незащищённый в соседнем — это системная дыра.
-   - Может ли internal-эндпоинт быть вызван напрямую снаружи кластера (нет
-     ли дополнительного network-level ограничения, если auth слабый)?
+4. **Internal-API between services**
+   - Walk ALL `/internal/*` endpoints in ALL services and build a table:
+     service | endpoint | does it require a shared-secret/mTLS | is the secret
+     actually verified (not merely declared in environment variables). Look
+     for discrepancies — the same class of operation (send-message,
+     delete-by-id, wipe-data, sync) protected in one service and unprotected
+     in a neighboring one is a systemic hole.
+   - Can an internal endpoint be called directly from outside the cluster (is
+     there no additional network-level restriction, if auth is weak)?
 
-5. **Инъекции (SQL / NoSQL / Command / Template / Deserialization)**
-   - Найди все места сборки запросов конкатенацией/f-string/format вместо
-     параметризованных запросов или ORM. Особое внимание — публичным
-     query-параметрам (фильтры дашбордов, поиск, сортировка).
-   - Если есть экранирование "вручную" — проверь полноту (обратный слэш,
-     юникод, вложенные кавычки).
-   - Command injection: любые subprocess/os.system/exec с интерполяцией
-     пользовательского ввода.
-   - Server-side template injection: если пользовательский ввод попадает в
-     шаблонизатор.
-   - NoSQL injection: если используется Mongo/аналоги — операторы ($where,
-     $ne) из пользовательского ввода.
-   - Небезопасная десериализация: `pickle`, `yaml.load` без `SafeLoader`,
-     `jsonpickle`, `eval`/`exec` над данными, пришедшими из очереди,
-     вебхука или межсервисного вызова, а не только из HTTP-запроса
-     напрямую.
+5. **Injections (SQL / NoSQL / Command / Template / Deserialization)**
+   - Find all places that build queries by concatenation/f-string/format
+     instead of parameterized queries or ORM. Pay special attention to public
+     query parameters (dashboard filters, search, sorting).
+   - If there is "manual" escaping, verify completeness (backslash, unicode,
+     nested quotes).
+   - Command injection: any subprocess/os.system/exec with interpolation of
+     user input.
+   - Server-side template injection: if user input reaches a template engine.
+   - NoSQL injection: if Mongo/analogues are used — operators ($where, $ne)
+     from user input.
+   - Insecure deserialization: `pickle`, `yaml.load` without `SafeLoader`,
+     `jsonpickle`, `eval`/`exec` over data that came from a queue, a webhook,
+     or an inter-service call, not just directly from an HTTP request.
 
 6. **SSRF (Server-Side Request Forgery)**
-   - Любой код, который делает исходящий HTTP-запрос по URL, пришедшему от
-     пользователя или из внешней системы (вебхуки, media_url, callback_url,
-     интеграции с CRM/мессенджерами) — есть ли allow-list доменов,
-     блокировка приватных/internal IP-диапазонов (169.254.x.x, 10.x,
-     172.16-31.x, 192.168.x, 127.x, metadata-эндпоинты облаков)?
-   - Проверяется ли подпись/источник вебхука перед тем, как система
-     инициирует ответный запрос по URL из тела вебхука?
+   - Any code that makes an outbound HTTP request to a URL that came from the
+     user or from an external system (webhooks, media_url, callback_url,
+     integrations with CRMs/messengers) — is there a domain allow-list,
+     blocking of private/internal IP ranges (169.254.x.x, 10.x, 172.16-31.x,
+     192.168.x, 127.x, cloud metadata endpoints)?
+   - Is the webhook's signature/origin verified before the system initiates a
+     response request to a URL from the webhook body?
 
-7. **XSS (включая Stored XSS в клиентских виджетах)**
-   - Любое использование innerHTML/dangerouslySetInnerHTML/document.write с
-     недоверенными данными.
-   - Встраиваемые на сторонних сайтах виджеты — это код, исполняющийся в
-     браузере конечных посетителей сайтов ваших клиентов. Уязвимость там
-     имеет более широкий радиус поражения, чем внутренняя XSS —
-     квалифицируй с учётом этого при оценке severity.
-   - CSP (Content-Security-Policy) настроен ли и достаточно ли строг.
-   - Clickjacking: заголовки `X-Frame-Options`/`frame-ancestors` —
-     предотвращают ли встраивание основного приложения (не виджета) в
-     чужой iframe.
+7. **XSS (including Stored XSS in client widgets)**
+   - Any use of innerHTML/dangerouslySetInnerHTML/document.write with
+     untrusted data.
+   - Widgets embedded on third-party sites are code that executes in the
+     browsers of the end visitors of your customers' sites. A vulnerability
+     there has a wider blast radius than internal XSS — qualify it accordingly
+     when assessing severity.
+   - Is CSP (Content-Security-Policy) configured and sufficiently strict?
+   - Clickjacking: the `X-Frame-Options`/`frame-ancestors` headers — do they
+     prevent embedding the main application (not the widget) in someone else's
+     iframe?
 
-8. **Работа с секретами и PII**
-   - Секреты в коде/конфигах, отслеживаемых git (values-*.yaml,
-     *-secrets.yaml, .env закоммиченные, hardcoded API keys/tokens в
-     исходниках).
-   - Скрипты выгрузки персональных данных (дампы контактов/клиентов),
-     лежащие в репозитории — сами по себе являются риском независимо от
-     прав доступа к репо.
-   - Хранение токенов интеграций (Telegram/WhatsApp боты и т.п.) в БД — в
-     открытом виде или зашифрованы?
-   - Локальные сессии клиентов мессенджеров (например, TDLib-сессии) на
-     диске — зашифрованы ли at rest?
-   - Проверь git history командой вроде `git log --all --full-history --
-     <path>` для файлов, которые сейчас удалены, но могли содержать секреты
-     в прошлом.
-   - Маскирование секретов в логах (redaction) — работает ли для всех
-     типов секретов (bot_token, api_key, access_token, пароли, PII), а не
-     только для части.
-   - `.env.example`/примеры конфигов — не содержат ли они по ошибке
-     реальное значение вместо плейсхолдера; не печатаются ли переменные
-     окружения целиком в CI-логи (`env`, `printenv`, debug-вывод конфига
-     при старте сервиса).
+8. **Secrets and PII handling**
+   - Secrets in code/configs tracked by git (values-*.yaml, *-secrets.yaml,
+     committed .env, hardcoded API keys/tokens in source).
+   - Personal-data export scripts (dumps of contacts/customers) sitting in the
+     repository — a risk in themselves regardless of repo access rights.
+   - Storage of integration tokens (Telegram/WhatsApp bots, etc.) in the DB —
+     plaintext or encrypted?
+   - Local messenger client sessions (e.g. TDLib sessions) on disk — are they
+     encrypted at rest?
+   - Check git history with a command like `git log --all --full-history --
+     <path>` for files that are currently deleted but may have contained
+     secrets in the past.
+   - Secret masking in logs (redaction) — does it work for all types of
+     secrets (bot_token, api_key, access_token, passwords, PII), not just for
+     some?
+   - `.env.example`/config samples — do they by mistake contain a real value
+     instead of a placeholder; are environment variables not printed in full
+     into CI logs (`env`, `printenv`, debug dump of the config at service
+     startup)?
 
-9. **Загрузка и хранение файлов**
-   - Проверка MIME-типа и расширения при загрузке (не доверять
-     Content-Type от клиента без валидации содержимого).
-   - Ограничение размера файла, защита от zip-бомб/decompression bomb для
-     архивов.
-   - Публичные эндпоинты раздачи файлов (/public/documents и т.п.) —
-     требуют ли аутентификации, если файлы содержат PII или приватные
-     данные?
-   - Path traversal при формировании пути сохранения/чтения файла из
-     пользовательского ввода.
-   - Object storage (S3/MinIO): публичность бакетов, версионирование,
-     репликация.
+9. **File upload and storage**
+   - MIME-type and extension validation on upload (do not trust the client's
+     Content-Type without validating the content).
+   - File size limit, protection against zip bombs/decompression bombs for
+     archives.
+   - Public file-serving endpoints (/public/documents, etc.) — do they require
+     authentication if the files contain PII or private data?
+   - Path traversal when building the save/read path of a file from user
+     input.
+   - Object storage (S3/MinIO): bucket publicity, versioning, replication.
 
-10. **Зависимости и суплай-чейн**
-    - Полная разбивка уязвимостей по критичности и по сервисам (не общая
-      цифра, а по каждому сервису отдельно — где сосредоточен риск).
-    - Совпадающие критичные библиотеки, используемые в нескольких сервисах
-      разных версий (например, разные версии одного фреймворка в разных
-      сервисах — означает, что патч придётся катить N раз).
-    - Docker base images: используются ли устаревшие/EOL версии, теги
-      :latest вместо пиннинга по digest/версии.
-    - Lock-файлы (poetry.lock, package-lock.json, uv.lock) — закоммичены
-      ли, соответствуют ли заявленным версиям.
-    - Dependency confusion: внутренние пакеты (libs/shared_auth,
-      libs/shared_metrics и аналоги) — устанавливаются ли из приватного
-      индекса/по локальному пути или по голому имени с публичного
-      PyPI/npm, где одноимённый публичный пакет мог бы их подменить.
+10. **Dependencies and supply chain**
+    - A full breakdown of vulnerabilities by criticality and by service (not a
+      single aggregate number, but per service separately — where the risk is
+      concentrated).
+    - Matching critical libraries used in several services at different
+      versions (e.g. different versions of one framework in different services
+      — meaning a patch has to be rolled out N times).
+    - Docker base images: are outdated/EOL versions used, :latest tags instead
+      of pinning by digest/version?
+    - Lock files (poetry.lock, package-lock.json, uv.lock) — are they
+      committed, do they match the declared versions?
+    - Dependency confusion: internal packages (libs/shared_auth,
+      libs/shared_metrics, and analogues) — are they installed from a private
+      index/by local path, or by a bare name from public PyPI/npm, where a
+      same-named public package could substitute them?
 
-11. **Docker / контейнеры**
-    - USER указан (non-root) в каждом Dockerfile — построй таблицу по всем
-      образам.
+11. **Docker / containers**
+    - USER set (non-root) in every Dockerfile — build a table across all
+      images.
     - readOnlyRootFilesystem, drop: ALL capabilities,
-      allowPrivilegeEscalation: false в securityContext.
-    - Секреты не передаются через ARG/ENV в Dockerfile (попадают в историю
-      слоёв).
-    - Multi-stage build для исключения build-инструментов и
-      dev-зависимостей из финального образа.
+      allowPrivilegeEscalation: false in securityContext.
+    - Secrets not passed via ARG/ENV in the Dockerfile (they end up in the
+      layer history).
+    - Multi-stage build to exclude build tools and dev dependencies from the
+      final image.
 
 12. **Kubernetes / Helm**
-    - networkPolicy для баз данных, кэшей, очередей (Redis, PostgreSQL,
-      RabbitMQ) — включены ли в prod, ограничивают ли трафик только
-      доверенными подами.
-    - resources requests/limits заданы (не пустой {} по умолчанию) для
-      предотвращения noisy neighbor и DoS через исчерпание ресурсов.
-    - liveness/readiness пробы для сервисов ядра бизнес-логики.
-    - Секреты через Kubernetes Secrets/внешний secret-manager, а не в
-      values.yaml открытым текстом.
-    - Single point of failure: количество реплик для stateful-компонентов
-      (Redis, RabbitMQ, MinIO, БД) в prod — 1 реплика для критичного
-      компонента является риском доступности, фиксируй отдельно от
-      security-находок, но не игнорируй.
-    - Стратегия бэкапов БД — задокументирована и автоматизирована ли.
+    - networkPolicy for databases, caches, queues (Redis, PostgreSQL,
+      RabbitMQ) — are they enabled in prod, do they restrict traffic to
+      trusted pods only?
+    - resources requests/limits set (not an empty {} by default) to prevent
+      noisy neighbor and DoS through resource exhaustion.
+    - liveness/readiness probes for the core business-logic services.
+    - Secrets via Kubernetes Secrets/an external secret manager, not in
+      values.yaml in plaintext.
+    - Single point of failure: the replica count for stateful components
+      (Redis, RabbitMQ, MinIO, DB) in prod — 1 replica for a critical
+      component is an availability risk; record it separately from security
+      findings, but do not ignore it.
+    - DB backup strategy — is it documented and automated?
 
-13. **Обработка ошибок и наблюдаемость**
-    - Паттерн "молчаливого проглатывания" ошибок (broad except с
-      логированием и возвратом None/пустого результата без re-raise/
-      алерта) — маскирует ли это сбои безопасности (например, неудавшуюся
-      проверку авторизации, которая по ошибке трактуется как "разрешено")?
-    - Логируются ли security-события (неудачные попытки авторизации,
-      изменение ролей, массовые удаления) отдельно и доступны ли для
-      мониторинга/алертинга.
-    - Утечка внутренней информации через сообщения об ошибках (стектрейсы,
-      версии библиотек, структура БД) в ответах API наружу.
+13. **Error handling and observability**
+    - The "silent swallowing" pattern of errors (a broad except that logs and
+      returns None/an empty result without re-raise/alert) — does this mask
+      security failures (e.g. a failed authorization check that is mistakenly
+      treated as "allowed")?
+    - Are security events (failed authorization attempts, role changes, bulk
+      deletes) logged separately and available for monitoring/alerting?
+    - Leakage of internal information through error messages (stack traces,
+      library versions, DB structure) in API responses to the outside.
 
-14. **CI/CD и процесс**
-    - Есть ли обязательное код-ревью перед мержем в защищённые ветки.
-    - Есть ли блокирующий security-гейт в CI (SCA/SAST/secret-scan),
-      который реально останавливает мерж при critical/high находках, а не
-      просто печатает предупреждение.
-    - Есть ли регрессионный чек-лист по ранее найденным уязвимостям,
-      который прогоняется перед каждым релизом.
-    - Кто владеет решением "мержить/не мержить" при найденной уязвимости —
-      есть ли явный security owner с правом блокировки.
-    - CI script injection: интерполируется ли непроверенный внешний ввод
-      (заголовок PR, имя ветки, issue title) напрямую в шаг `run:`
-      пайплайна — классический вектор кражи CI-секретов, который SCA/SAST
-      не ловят.
-    - Публичные админ/debug-эндпоинты в проде: Swagger/OpenAPI UI,
-      admin-панели фреймворка, интерактивные debug-консоли (например,
-      Werkzeug) — доступны ли без аутентификации на боевом окружении.
+14. **CI/CD and process**
+    - Is code review before merge into protected branches mandatory?
+    - Is there a blocking security gate in CI (SCA/SAST/secret-scan) that
+      actually stops the merge on critical/high findings, rather than just
+      printing a warning?
+    - Is there a regression checklist for previously found vulnerabilities
+      that is run before each release?
+    - Who owns the "merge/don't merge" decision when a vulnerability is found
+      — is there an explicit security owner with the right to block?
+    - CI script injection: is unvalidated external input (PR title, branch
+      name, issue title) interpolated directly into a `run:` step of the
+      pipeline — the classic vector for stealing CI secrets that SCA/SAST do
+      not catch?
+    - Public admin/debug endpoints in prod: Swagger/OpenAPI UI, framework
+      admin panels, interactive debug consoles (e.g. Werkzeug) — are they
+      accessible without authentication in the production environment?
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ
+## EDGE CASES OFTEN MISSED
 
-- Функциональность, защищённая на UI-уровне (кнопка скрыта), но доступная
-  напрямую через API без проверки на бэкенде.
-- Race condition в проверках "check-then-act" (например, проверка роли и
-  последующее действие не атомарны, между ними можно вклиниться).
-- Отличия в поведении для "мягко удалённых" (soft-deleted) записей —
-  доступны ли они через API, который не учитывает флаг удаления.
-- Массовые операции (bulk endpoints) — часто имеют более слабую
-  авторизацию, чем их единичные аналоги, потому что добавлены позже
-  "по-быстрому".
-- Вебхуки от внешних систем — проверяется ли подпись/источник, или
-  доверяем любому телу запроса, пришедшему на публичный URL.
-- Feature-флаги безопасности, выключенные "временно для отладки" и
-  забытые в этом состоянии в конфиге по умолчанию.
-- Различия между окружениями (dev/staging/prod) — фикс, применённый в
-  одной конфигурации helm-values, может отсутствовать в другой.
-- Экспорт данных (CSV/Excel/PDF генерация) — проверяется ли авторизация
-  на экспортируемый объём данных так же строго, как на обычное чтение
-  через UI.
-- Повторное использование одного и того же секрета/ключа в нескольких
-  сервисах — компрометация одного сервиса даёт доступ к остальным.
-- Устаревшие/неиспользуемые эндпоинты, оставленные в коде "на всякий
-  случай" без документации и без auth, потому что "никто ими не
-  пользуется".
+- Functionality protected at the UI level (button hidden) but accessible
+  directly through the API without a backend check.
+- A race condition in "check-then-act" checks (e.g. the role check and the
+  subsequent action are not atomic, and you can wedge in between them).
+- Behavioral differences for "soft-deleted" records — are they accessible
+  through an API that does not account for the deletion flag?
+- Bulk operations (bulk endpoints) — they often have weaker authorization than
+  their single-item counterparts, because they were added later "quick and
+  dirty".
+- Webhooks from external systems — is the signature/origin verified, or do we
+  trust any request body that arrives at a public URL?
+- Security feature flags turned off "temporarily for debugging" and forgotten
+  in that state in the default config.
+- Differences between environments (dev/staging/prod) — a fix applied in one
+  helm-values configuration may be absent in another.
+- Data export (CSV/Excel/PDF generation) — is authorization on the exported
+  data volume verified as strictly as on ordinary reads through the UI?
+- Reuse of the same secret/key across several services — compromise of one
+  service grants access to the rest.
+- Outdated/unused endpoints left in the code "just in case", undocumented and
+  without auth, because "nobody uses them".
 
-## ШКАЛА SEVERITY
+## SEVERITY SCALE
 
-Фиксированная шкала нужна, чтобы находки были сравнимы между собой и между
-повторными аудитами (иначе таблица сопоставления "предыдущий отчёт →
-текущий" теряет смысл, если severity расставляется каждый раз по-новому).
-Та же шкала используется в скилле `security-audit-feature`.
+A fixed scale is needed so findings are comparable to each other and across
+re-audits (otherwise the "previous report → current" comparison table loses
+meaning if severity is assigned anew each time). The same scale is used in the
+`security-audit-feature` skill.
 
-- **Critical**: неаутентифицированный внешний атакующий получает полный
-  компромисс (RCE, доступ ко всем данным всех компаний-клиентов, обход
-  аутентификации целиком).
-- **High**: аутентифицированный пользователь (в т.ч. с минимальной ролью)
-  получает доступ к чужим данным/привилегиям — включая межтенантный доступ
-  (см. раздел 2), либо неаутентифицированный атакующий получает доступ к
-  данным одной компании/одного пользователя.
-- **Medium**: требует специфичных условий (гонка, конкретная роль, MITM,
-  социальная инженерия) или ограничивается ограниченной утечкой
-  метаданных/DoS отдельного компонента без потери данных.
-- **Low**: нарушение best practice без прямого сценария эксплуатации на
-  момент аудита (например, отсутствующий заголовок безопасности без
-  известного вектора атаки в текущей архитектуре).
+- **Critical**: an unauthenticated external attacker achieves full compromise
+  (RCE, access to all data of all customer companies, full authentication
+  bypass).
+- **High**: an authenticated user (including one with a minimal role) gains
+  access to someone else's data/privileges — including cross-tenant access
+  (see section 2) — or an unauthenticated attacker gains access to the data of
+  one company/one user.
+- **Medium**: requires specific conditions (a race, a particular role, MITM,
+  social engineering) or is limited to a limited metadata leak/DoS of a single
+  component without data loss.
+- **Low**: a best-practice violation with no direct exploitation scenario at
+  the time of the audit (e.g. a missing security header with no known attack
+  vector in the current architecture).
 
-Для каждой находки указывай не только итоговый уровень, но и кто может
-эксплуатировать (аноним / аутентифицированный юзер / только внутренняя
-сеть) и что теряется (чтение / запись / полный компромисс) — это и есть
-обоснование уровня.
+For each finding, state not only the final level but also who can exploit it
+(anonymous / authenticated user / internal network only) and what is lost
+(read / write / full compromise) — that is the justification for the level.
 
-## ФОРМАТ ОТЧЁТА
+## REPORT FORMAT
 
-1. Executive summary (для руководства, без технического жаргона): что
-   критично, что рискует бизнесом/репутацией/регуляторикой, что делать в
-   первую очередь.
-2. Таблица KPI: число critical/high/medium/low находок, число уязвимостей
-   зависимостей по критичности, % контейнеров под non-root, число
-   незакрытых рисков из предыдущего отчёта (если это повторный аудит).
-3. Если это повторный аудит — таблица сопоставления "пункт предыдущего
-   отчёта → текущее состояние (file:line) → статус (не исправлено /
-   формально / выборочно / исправлено)". Не принимай прошлые объяснения
-   без перепроверки.
-4. Раздел "исправлено, но не работает" отдельно — это самый показательный
-   сигнал о зрелости процесса, выделяй его явно.
-5. Полный список находок с привязкой file:line, конкретным сценарием
-   эксплуатации, severity (CVSS-подобная оценка или
-   critical/high/medium/low) и рекомендацией.
-6. Раздел "что сделано хорошо" — сильные паттерны в кодовой базе, которые
-   стоит тиражировать, а не переделывать. Аудит без баланса теряет доверие
-   и её сложнее использовать для мотивации команды.
-7. План действий по срокам: 24-48 часов (эксплуатируемые сегодня векторы),
-   1 неделя (остальные critical), 2-4 недели (процесс и архитектура),
-   решения уровня руководства (владелец безопасности, независимая
-   переверификация, архитектурные решения, которые нельзя решить
-   точечными патчами).
-8. Раздел "методология и ограничения покрытия" — какие инструменты
-   использовались, какие директории/сервисы НЕ были просканированы и
-   почему, чтобы отсутствие находок в непокрытой зоне не читалось как
-   "там всё чисто".
+1. Executive summary (for leadership, no technical jargon): what is critical,
+   what is a business/reputational/regulatory risk, what to do first.
+2. KPI table: number of critical/high/medium/low findings, number of
+   dependency vulnerabilities by criticality, % of containers running
+   non-root, number of unclosed risks from the previous report (if this is a
+   re-audit).
+3. If this is a re-audit — a comparison table "previous-report item → current
+   state (file:line) → status (not fixed / on paper / selectively / fixed)".
+   Do not accept past explanations without re-verification.
+4. A "fixed but not working" section separately — this is the most telling
+   signal of process maturity; call it out explicitly.
+5. Full list of findings tied to file:line, with a concrete exploitation
+   scenario, severity (a CVSS-like score or critical/high/medium/low), and a
+   recommendation.
+6. A "what was done well" section — strong patterns in the codebase worth
+   replicating rather than redoing. An audit without balance loses trust and
+   is harder to use to motivate the team.
+7. Action plan by timeframe: 24-48 hours (vectors exploitable today), 1 week
+   (the remaining critical), 2-4 weeks (process and architecture),
+   leadership-level decisions (a security owner, independent re-verification,
+   architectural decisions that cannot be solved with pinpoint patches).
+8. A "methodology and coverage limitations" section — which tools were used,
+   which directories/services were NOT scanned and why, so the absence of
+   findings in an uncovered zone does not read as "everything there is clean".
 
-## ПРАВИЛА ОФОРМЛЕНИЯ НАХОДОК
+## FINDING FORMATTING RULES
 
-Для каждой находки обязательны:
+For each finding, the following are mandatory:
 
-- Стабильный ID находки (например, `SEC-2026-08-04-001`) — чтобы при
-  повторном аудите можно было сослаться на конкретную находку по ID, а не
-  пересказывать её заново своими словами (пересказ может незаметно
-  "уехать" от исходной формулировки и сломать сопоставление статусов между
-  аудитами).
-- Путь к файлу и номер строки (или диапазон).
-- Название уязвимости и категория (можно сослаться на OWASP Top 10 / OWASP
-  API Security Top 10 / CWE).
-- Конкретный сценарий эксплуатации: "если сделать запрос X с параметром Y,
-  система вернёт/сделает Z" — не абстрактные формулировки вроде "может быть
-  уязвимость".
-- Severity с обоснованием (кто может использовать: аутентифицированный
-  пользователь / любой внешний / только внутренняя сеть; что теряется:
-  чтение данных / запись / полный компромисс).
-- Статус относительно предыдущего аудита, если применимо.
-- Рекомендация по исправлению — конкретная (не "улучшить безопасность", а
-  "добавить else-ветку с явным отказом", "включить флаг X по умолчанию",
-  "заменить f-string на параметризованный запрос").
+- A stable finding ID (e.g. `SEC-2026-08-04-001`) — so that at re-audit you
+  can reference a specific finding by ID rather than retelling it in your own
+  words (a retelling can quietly "drift" from the original wording and break
+  the status mapping between audits).
+- The file path and line number (or range).
+- The vulnerability name and category (may reference OWASP Top 10 / OWASP API
+  Security Top 10 / CWE).
+- A concrete exploitation scenario: "if you make request X with parameter Y,
+  the system will return/do Z" — not abstract wording like "there may be a
+  vulnerability".
+- Severity with justification (who can use it: authenticated user / any
+  external / internal network only; what is lost: data read / write / full
+  compromise).
+- Status relative to the previous audit, if applicable.
+- A remediation recommendation — concrete (not "improve security", but "add an
+  else branch with an explicit denial", "enable flag X by default", "replace
+  the f-string with a parameterized query").
 
-## ЗАПУСК АУДИТА (практическая инструкция)
+## RUNNING THE AUDIT (practical instructions)
 
-1. Определи периметр: перечисли все сервисы (директории верхнего уровня в
-   `services/`), фронтенд-приложения, встраиваемые виджеты/расширения,
-   инфраструктурные конфиги.
-2. Прочитай реестр прошлых находок в `docs/bugs/security_audit/` ПЕРЕД
-   началом ручного разбора, если он есть, — это готовый источник уже
-   известных проблем, не дублируй работу, а проверь, устранены ли они.
-3. Запусти автоматизированные инструменты СРЕЗА 1 по каждому
-   сервису/образу/чарту, где это возможно в текущем окружении, сохрани
-   сырой вывод для приложений к отчёту. Отфильтруй заведомые false
-   positive (тестовые фикстуры, placeholder-значения вида
-   "changeme"/"example_key") явным списком в разделе ограничений, а не
-   молча — чтобы было видно, что они рассмотрены, а не пропущены.
-4. Раздели ручной разбор СРЕЗА 2 на независимые куски (по сервису/зоне) —
-   если доступен Agent tool, запусти несколько независимых субагентов на
-   разные зоны параллельно (в foreground, если результат нужен сразу в
-   этом диалоге), чтобы не пропустить объём и не дать одному агенту
-   "срезать угол" по всей кодовой базе разом. Кодовая база крупная
-   (десяток+ сервисов) — каждому субагенту передай конкретный список
-   файлов/директорий его зоны и применимые разделы этого скилла (чек-лист,
-   шкалу severity, формат находки), а не пересказ своими словами. Записывай
-   подтверждённые находки в промежуточный файл сразу по мере разбора
-   каждой зоны, а не держи их только в контексте до финального отчёта: при
-   сжатии длинного диалога ранее найденное иначе может потеряться.
-5. Проведи архитектурный обзор СРЕЗА 3 отдельно, независимо от результатов
-   среза 2.
-6. Сведи все три среза в единый отчёт по формату выше, убери дубликаты, но
-   не объединяй находки разной природы (secret-scanner нашёл файл ≠ ручной
-   разбор подтвердил, что секрет реальный и активный — фиксируй оба факта,
-   если они есть).
-7. Если это повторный аудит — обязательно перепроверь КАЖДЫЙ пункт
-   предыдущего отчёта по текущему состоянию кода, а не полагайся на
-   статус, заявленный командой.
-8. Явно укажи, какие проверки НЕ были выполнены (ограничения окружения,
-   нет доступа к прод-секретам, нет доступа к рантайм-логам и т.п.) — это
-   часть честного отчёта, а не его слабость.
-9. Сохрани финальный отчёт файлом в `docs/bugs/security_audit/` (например,
-   `full-audit-<дата>.md`) — это то же место, где хранится реестр прошлых
-   находок, и следующий повторный аудит должен его найти при сверке.
+1. Determine the scope: list all services (top-level directories in
+   `services/`), frontend applications, embeddable widgets/extensions,
+   infrastructure configs.
+2. Read the registry of past findings in `docs/bugs/security_audit/` BEFORE
+   starting the manual review, if it exists — it is a ready source of already
+   known problems; don't duplicate work, just check whether they are fixed.
+3. Run the automated tools of PASS 1 on each service/image/chart where
+   possible in the current environment, and save the raw output for report
+   appendices. Filter out obvious false positives (test fixtures, placeholder
+   values like "changeme"/"example_key") with an explicit list in the
+   limitations section, not silently — so it is visible that they were
+   considered, not skipped.
+4. Split the manual review of PASS 2 into independent chunks (by service/zone)
+   — if the Agent tool is available, launch several independent subagents on
+   different zones in parallel (in foreground, if the result is needed
+   immediately in this dialogue), so as not to miss volume and not to let one
+   agent "cut corners" across the whole codebase at once. The codebase is
+   large (a dozen+ services) — give each subagent a concrete list of
+   files/directories for its zone and the applicable sections of this skill
+   (checklist, severity scale, finding format), not a retelling in your own
+   words. Record confirmed findings in an intermediate file as you review each
+   zone, rather than keeping them only in context until the final report:
+   otherwise, when a long dialogue is compacted, earlier findings can be lost.
+5. Perform the architectural review of PASS 3 separately, independently of the
+   PASS 2 results.
+6. Consolidate all three passes into a single report per the format above,
+   remove duplicates, but do not merge findings of different natures (a
+   secret-scanner found a file ≠ manual review confirmed the secret is real
+   and active — record both facts if both exist).
+7. If this is a re-audit — be sure to re-verify EACH item of the previous
+   report against the current state of the code, rather than relying on the
+   status claimed by the team.
+8. Explicitly state which checks were NOT performed (environment limitations,
+   no access to prod secrets, no access to runtime logs, etc.) — this is part
+   of an honest report, not its weakness.
+9. Save the final report as a file in `docs/bugs/security_audit/` (e.g.
+   `full-audit-<date>.md`) — this is the same place where the registry of past
+   findings is kept, and the next re-audit should find it during
+   reconciliation.
 
-Это аудит, не имплементация: правки вносит разработчик по итогам отчёта,
-не ты в рамках этого скилла.
+This is an audit, not implementation: the developer makes the changes based on
+the report, not you within this skill.
+

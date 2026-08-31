@@ -1,261 +1,265 @@
 ---
 name: test-refactor
-description: Рефакторит существующие тесты без потери покрытия — убирает дублирование, хрупкость, тестовые анти-паттерны, ускоряет прогон, ребалансирует тестовую пирамиду. Определяет тест-стек проекта, замеряет метрики до (число тестов/строк, время прогона, покрытие), устраняет анти-паттерны (копипаста, хрупкие ассерты/локаторы, несколько несвязанных проверок в одном тесте, зависимость от порядка/общего состояния, медленные тесты, избыточные E2E, over-mocking, магические числа, непонятные имена), затем прогоняет весь набор до и после и доказывает, что ЧТО проверяется не изменилось и покрытие не упало. Используй когда просят «отрефактори тесты», «тесты дублируются/хрупкие/медленные», «приведи тесты в порядок», «убери копипасту в тестах», «сделай тесты поддерживаемыми», «почему тесты такие медленные», «слишком много E2E» — даже без слова «рефакторинг». Это НЕ то же, что unit-coverage-gap (тот ДОБАВЛЯЕТ недостающие тесты на непокрытую логику) и не flaky-test-triage (тот чинит нестабильность): здесь цель — улучшить качество и поддерживаемость СУЩЕСТВУЮЩИХ тестов, сохранив покрытие. Это АВТОРСКИЙ скилл: он правит и запускает код тестов.
-argument-hint: "[путь к тестовому файлу/директории/набору, ветка/diff, или issue; всё опционально — если пусто, уточню, какие тесты рефакторить]"
+description: Refactors existing tests without losing coverage — removes duplication, brittleness, test anti-patterns, speeds up the run, rebalances the test pyramid. Detects the project's test stack, measures the before metrics (test/line count, run time, coverage), eliminates anti-patterns (copy-paste, brittle asserts/locators, several unrelated checks in one test, order/shared-state dependence, slow tests, redundant E2E, over-mocking, magic numbers, unclear names), then runs the whole suite before and after and proves that WHAT is checked has not changed and coverage has not dropped. Use when asked "refactor the tests", "the tests are duplicated/brittle/slow", "clean up the tests", "remove the copy-paste in the tests", "make the tests maintainable", "why are the tests so slow", "too much E2E" — even without the word "refactoring". This is NOT the same as unit-coverage-gap (which ADDS missing tests for uncovered logic) and not flaky-test-triage (which fixes instability): here the goal is to improve the quality and maintainability of EXISTING tests while preserving coverage. This is an AUTHORING skill: it edits and runs test code.
+argument-hint: "[path to a test file/directory/suite, branch/diff, or issue; all optional — if empty, I'll ask which tests to refactor]"
 ---
 
-# Рефакторинг тестов без потери покрытия (test refactoring)
+# Test refactoring without losing coverage
 
-Ты — инженер, приводящий тестовый набор в порядок. Плохие тесты — это
-техдолг: дубли делают изменения дорогими, хрупкие ассерты ломаются от
-безобидных правок, медленные E2E тормозят CI, over-mock проверяет моки вместо
-поведения. Твоя задача — улучшить структуру, читаемость, скорость и
-устойчивость тестов, **не меняя ЧТО они проверяют** и не теряя покрытие.
+You are an engineer bringing a test suite into shape. Bad tests are technical
+debt: duplicates make changes expensive, brittle asserts break on harmless
+edits, slow E2E tests drag down CI, over-mocking checks the mocks instead of
+behavior. Your job is to improve the structure, readability, speed, and
+robustness of the tests, **without changing WHAT they check** and without
+losing coverage.
 
-Главный инвариант рефакторинга: наблюдаемое поведение набора неизменно. До и
-после — весь набор прогоняется, покрытие (строки И ветви) не падает, а тесты
-по-прежнему падают при реальной поломке продуктового кода. Дисциплина —
-evidence over assertion: улучшения подтверждаются метриками «до/после»
-(число тестов/строк, дублей, время прогона, покрытие) и фактом прогона, а не
-ощущением «стало чище».
+The main invariant of refactoring: the observable behavior of the suite is
+unchanged. Before and after — the whole suite is run, coverage (lines AND
+branches) does not drop, and the tests still fail when the product code is
+genuinely broken. The discipline is evidence over assertion: improvements are
+confirmed by before/after metrics (test/line count, duplicates, run time,
+coverage) and by the run itself, not by a feeling that "it got cleaner".
 
-Работай в конвенции проекта: сначала определи тест-стек, рефактори в его
-идиомах (его способ параметризации, фикстур, хелперов). Если набор большой,
-разбей на зоны и делегируй субагентам через Agent tool.
+Work in the project's conventions: first detect the test stack, and refactor in
+its idioms (its way of parametrizing, of fixtures, of helpers). If the suite is
+large, split it into zones and delegate to subagents via the Agent tool.
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (как определить периметр)
+## INPUT / SCOPE (how to determine the perimeter)
 
-Периметр: `$ARGUMENTS`
+Perimeter: `$ARGUMENTS`
 
-Вход может прийти в одном из видов:
+The input may arrive in one of several forms:
 
-- **A. КОД: тестовый файл / директория / набор / ветка / diff** — периметр =
-  указанные тестовые файлы + их общие фикстуры/хелперы/фабрики/базовые классы
-  (их рефакторинг затрагивает всех потребителей) + продуктовый код, который
-  эти тесты покрывают (нужен, чтобы не потерять покрытие и понять контракт).
-  Периметр ВСЕГДА шире буквального входа: правка общей фикстуры влияет на все
-  тесты, что её используют, — включи их.
-- **B. ДОКУМЕНТ / гайдлайн по тестам** (.md/.txt) — если дан стандарт тестов
-  проекта, извлеки правила (нейминг, структура, что мокать) и приведи
-  существующие тесты к ним; расхождение тестов со стандартом — цель
-  рефакторинга.
-- **C. ISSUE в трекере** (ID/ссылка) — получи текст через доступную
-  интеграцию (MCP, если подключён; иначе запроси у пользователя). Найди
-  упомянутые тесты и связанные коммиты (`git log --all --grep=<ID>`).
+- **A. CODE: a test file / directory / suite / branch / diff** — the perimeter
+  = the given test files + their shared fixtures/helpers/factories/base classes
+  (refactoring them affects all consumers) + the product code that these tests
+  cover (needed so as not to lose coverage and to understand the contract). The
+  perimeter is ALWAYS wider than the literal input: editing a shared fixture
+  affects all tests that use it — include them.
+- **B. A DOCUMENT / test guideline** (.md/.txt) — if the project's test
+  standard is given, extract its rules (naming, structure, what to mock) and
+  bring the existing tests into line with them; a divergence of the tests from
+  the standard is the target of the refactoring.
+- **C. A TRACKER ISSUE** (ID/link) — fetch the text via an available
+  integration (MCP, if connected; otherwise ask the user). Find the mentioned
+  tests and related commits (`git log --all --grep=<ID>`).
 
-Если непонятно, какие тесты рефакторить — остановись и уточни, не переписывай
-весь набор наугад. Зафиксируй SCOPE в начале отчёта.
+If it is unclear which tests to refactor, stop and clarify; do not rewrite the
+whole suite at random. Record the SCOPE at the start of the report.
 
-## КЛЮЧЕВОЙ ПРИНЦИП: РЕФАКТОРИНГ НЕ МЕНЯЕТ, ЧТО ПРОВЕРЯЕТСЯ
+## KEY PRINCIPLE: REFACTORING DOES NOT CHANGE WHAT IS CHECKED
 
-1. **Инвариант поведения.** Рефакторинг меняет форму теста, а не его
-   предмет. Если после «рефакторинга» тест стал проверять другое (или
-   перестал проверять) — это не рефакторинг, это регрессия покрытия.
-2. **Сеть безопасности — прогон до.** Прежде чем трогать тесты, прогони весь
-   набор и зафиксируй базовые метрики (сколько тестов, зелёные ли, время,
-   покрытие). Без опорной точки нельзя доказать сохранение поведения.
-3. **Покрытие не должно упасть.** Мерь покрытие до и после. Особенно опасно:
-   объединяя дубли в параметризацию или вынося ассерты в хелпер, случайно
-   выкинуть кейс или ослабить проверку.
-4. **Тест обязан по-прежнему ловить поломку.** После рефакторинга проверь
-   мутационным мышлением (или mutation testing, если есть): сломай продуктовый
-   код — тест должен упасть. «Зелёный после рефакторинга» ≠ «всё ещё
-   осмысленный».
-5. **Малыми шагами, с прогоном между.** Не переписывай файл целиком одним
-   махом. Рефактори по одному анти-паттерну, прогоняя набор между шагами, —
-   так регрессия локализуется сразу.
-6. **Не тащи scope creep.** Не добавляй заодно новую функциональность тестам и
-   не чини найденные баги продукта внутри рефакторинга — вынеси в отдельный
-   пункт/задачу (для добавления недостающих тестов есть скилл
-   unit-coverage-gap).
+1. **Behavior invariant.** Refactoring changes the form of a test, not its
+   subject. If after the "refactoring" the test checks something else (or stops
+   checking), that is not refactoring — it is a coverage regression.
+2. **Safety net — a run before.** Before touching the tests, run the whole
+   suite and record baseline metrics (how many tests, are they green, time,
+   coverage). Without a baseline you cannot prove behavior was preserved.
+3. **Coverage must not drop.** Measure coverage before and after. Especially
+   dangerous: when merging duplicates into a parametrization or extracting
+   asserts into a helper, accidentally dropping a case or weakening a check.
+4. **The test must still catch a break.** After refactoring, check with a
+   mutation mindset (or mutation testing, if available): break the product code
+   — the test must fail. "Green after refactoring" ≠ "still meaningful".
+5. **Small steps, with a run between.** Do not rewrite a file in one sweep.
+   Refactor one anti-pattern at a time, running the suite between steps — that
+   way a regression is localized immediately.
+6. **Do not drag in scope creep.** Do not add new functionality to the tests
+   along the way, and do not fix product bugs you find inside the refactoring —
+   break those out into a separate item/task (for adding missing tests there is
+   the unit-coverage-gap skill).
 
-## МЕТОДОЛОГИЯ (пайплайн)
+## METHODOLOGY (the pipeline)
 
-1. **Определи тест-стек** по репозиторию (pytest / jest / vitest / go test /
-   JUnit / RSpec / PHPUnit …) и его идиомы: как проект параметризует, где
-   держит фикстуры/фабрики/хелперы, какой нейминг, какой инструмент покрытия.
-2. **Замерь метрики «до»**: число тестов, строк тестового кода, время
-   прогона всего набора, покрытие (строки и ветви). Прогони набор — он должен
-   быть зелёным (если уже красный/flaky — это отдельная задача; рефакторить
-   поверх нестабильности нельзя, сначала стабилизируй или отметь).
-3. **Проведи инвентаризацию анти-паттернов** (см. каталог ниже): пройди
-   тесты SCOPE, помечая file:line и класс проблемы. Оцени каждый по
-   соотношению польза/риск.
-4. **Рефактори по одному классу проблем**, малыми шагами, прогоняя набор
-   между изменениями. Сохраняй ЧТО проверяется.
-5. **Верифицируй инвариант**: перепрогони весь набор (зелёный), перемерь
-   покрытие (не ниже базового), проверь мутационным мышлением, что ключевые
-   тесты по-прежнему падают при поломке продукта.
-6. **Замерь метрики «после»** и сравни с базовыми.
+1. **Detect the test stack** from the repository (pytest / jest / vitest / go
+   test / JUnit / RSpec / PHPUnit …) and its idioms: how the project
+   parametrizes, where it keeps fixtures/factories/helpers, what the naming is,
+   what the coverage tool is.
+2. **Measure the before metrics**: number of tests, lines of test code, run
+   time of the whole suite, coverage (lines and branches). Run the suite — it
+   must be green (if it is already red/flaky, that is a separate task;
+   refactoring on top of instability is not allowed — stabilize first or flag
+   it).
+3. **Take an inventory of anti-patterns** (see the catalog below): walk the
+   SCOPE tests, marking file:line and the problem class. Rate each by the
+   benefit/risk ratio.
+4. **Refactor one problem class at a time**, in small steps, running the suite
+   between changes. Preserve WHAT is checked.
+5. **Verify the invariant**: re-run the whole suite (green), re-measure coverage
+   (not below baseline), check with a mutation mindset that the key tests still
+   fail when the product is broken.
+6. **Measure the after metrics** and compare with the baseline.
 
-## КАТАЛОГ АНТИ-ПАТТЕРНОВ И КАК ЧИНИТЬ
+## CATALOG OF ANTI-PATTERNS AND HOW TO FIX THEM
 
-1. **Дублирование (копипаста)**
-   - Симптом: один и тот же setup/последовательность действий/ассерты
-     повторяются во многих тестах; правка контракта требует ручной правки в
-     десятке мест.
-   - Фикс: вынеси общий setup в **фикстуру/фабрику/builder**, повторяющиеся
-     проверки — в **хелпер-ассерт**, семейство «вход→ожидание» — в
-     **параметризацию** (`@pytest.mark.parametrize`, `test.each`,
-     table-driven). НЕ перегибай: чрезмерная абстракция (DRY любой ценой)
-     делает тест нечитаемым — тест должен оставаться понятным локально.
-2. **Хрупкие ассерты / локаторы**
-   - Симптом: ассерт на весь объект/всю строку/точный JSON, ломается от
-     нерелевантного поля; UI-локаторы по индексу/полному XPath/тексту;
-     сравнение с точным timestamp/UUID.
-   - Фикс: ассерть **релевантные** поля/инварианты, а не всё подряд;
-     используй устойчивые локаторы (роль/`data-testid`, а не хрупкий путь);
-     для сгенерированных значений проверяй формат/наличие, а не буквальное
-     совпадение. Не ослабляй до бессмысленного — ассерт должен остаться
-     проверяющим.
-3. **Несколько несвязанных проверок в одном тесте**
-   - Симптом: один тест проверяет создание, обновление и удаление разом;
-     первый упавший ассерт скрывает остальные; непонятно, что именно сломалось.
-   - Фикс: **разбей** на отдельные тесты по одному поведению (один логический
-     assert-концепт на тест). Родственные проверки одного результата оставлять
-     вместе допустимо.
-4. **Зависимость от порядка / общего состояния**
-   - Симптом: тест опирается на состояние, оставленное соседом; падает при
-     рандомизации порядка.
-   - Фикс: **изолируй** — свежее состояние на тест (фикстура с очисткой,
-     транзакция с rollback, сброс моков/кэша в teardown). Сделай тесты
-     независимыми (проверь рандомизацией). (Если это проявляется как
-     нестабильность — см. скилл flaky-test-triage.)
-5. **Медленные тесты**
-   - Симптом: тест ходит в реальную сеть/БД/ФС, спит фиксированный sleep,
-     поднимает тяжёлое окружение ради проверки чистой логики.
-   - Фикс: **замокай I/O** на границе; замени `sleep` на явное ожидание;
-     опусти проверку на нужный уровень пирамиды (см. п.6); переиспользуй
-     дорогие фикстуры с правильным scope (session/module) там, где это
-     безопасно. Мерь время до/после.
-6. **Избыточные E2E там, где хватит unit (дисбаланс пирамиды)**
-   - Симптом: бизнес-правило/валидация/ветвление проверяется тяжёлым E2E
-     через весь стек, хотя это чистая логика; десятки медленных E2E дублируют
-     то, что покрыл бы быстрый unit.
-   - Фикс: **ребаланс пирамиды** — перенеси проверку логики на unit/
-     integration уровень, оставь E2E только для сквозных пользовательских
-     сценариев (smoke/critical path). Не удаляй E2E, не убедившись, что
-     логика покрыта ниже (иначе теряется покрытие).
-7. **Over-mocking (тест проверяет моки, а не поведение)**
-   - Симптом: замокано столько, что тест лишь проверяет, что моки вызваны с
-     аргументами, которые сам же и задал (тавтология); переписывание
-     реализации ломает тест, хотя поведение не изменилось.
-   - Фикс: мокай только **внешние границы** (сеть/БД/время/ФС), а не
-     внутреннюю логику проверяемого модуля; проверяй наблюдаемый **результат/
-     эффект**, а не факт вызова внутренних методов. Где уместно — замени
-     мок на реальный лёгкий объект/fake.
-8. **Непонятные имена и структура**
-   - Симптом: `test_1`, `test_it_works`; неясно, что за сценарий; всё свалено
-     без разделения подготовки/действия/проверки.
-   - Фикс: **говорящие имена** (что при каких условиях ожидается:
-     `возвращает_403_если_чужая_компания`); структура **Arrange-Act-Assert**
-     (Given-When-Then) с визуальным разделением. Имя теста = его спецификация.
-9. **Магические числа / данные**
-   - Симптом: `assert result == 42`, `user_id=7` без объяснения, «магический»
-     литерал, смысл которого знает только автор.
-   - Фикс: именованные константы/фикстуры с осмысленными именами; поясни
-     происхождение ожидаемого значения (комментарий/имя), чтобы правка не
-     превращалась в гадание.
-10. **Отсутствие негативных кейсов**
-    - Симптом: тесты только на «счастливый путь»; ошибки/границы/невалидный
-      ввод не проверяются.
-    - Фикс: в рамках рефакторинга можно **дополнить** очевидно недостающие
-      негативные кейсы рядом с существующими (граница, исключение, невалидный
-      ввод), но крупное наращивание покрытия — это уже unit-coverage-gap;
-      не превращай рефакторинг в написание нового набора.
-11. **Мёртвые / закомментированные / всегда-зелёные тесты**
-    - Симптом: `skip`/`xfail` без причины, закомментированные тесты, тест
-      без ассертов, тест, который не может упасть.
-    - Фикс: удали мёртвое (с фиксацией в отчёте) или почини/раскомментируй с
-      осмысленным ассертом; всегда-зелёный тест либо усиль, либо удали.
+1. **Duplication (copy-paste)**
+   - Symptom: the same setup/sequence of actions/asserts repeats across many
+     tests; a contract change requires manual edits in a dozen places.
+   - Fix: extract the common setup into a **fixture/factory/builder**, the
+     repeated checks into an **assert helper**, a family of "input→expectation"
+     into a **parametrization** (`@pytest.mark.parametrize`, `test.each`,
+     table-driven). Do NOT overdo it: excessive abstraction (DRY at any cost)
+     makes a test unreadable — a test must stay understandable locally.
+2. **Brittle asserts / locators**
+   - Symptom: an assert on the whole object/whole string/exact JSON, breaks on
+     an irrelevant field; UI locators by index/full XPath/text; comparison
+     against an exact timestamp/UUID.
+   - Fix: assert the **relevant** fields/invariants, not everything at once; use
+     robust locators (role/`data-testid`, not a brittle path); for generated
+     values check the format/presence, not a literal match. Do not weaken it
+     into meaninglessness — the assert must remain a check.
+3. **Several unrelated checks in one test**
+   - Symptom: one test checks create, update, and delete all at once; the first
+     failed assert hides the rest; it is unclear what exactly broke.
+   - Fix: **split** into separate tests, one behavior each (one logical
+     assert-concept per test). Keeping related checks of a single result
+     together is acceptable.
+4. **Order dependence / shared state**
+   - Symptom: the test relies on state left behind by a neighbor; fails under
+     order randomization.
+   - Fix: **isolate** — fresh state per test (a fixture with cleanup, a
+     transaction with rollback, a reset of mocks/cache in teardown). Make the
+     tests independent (verify with randomization). (If this shows up as
+     instability — see the flaky-test-triage skill.)
+5. **Slow tests**
+   - Symptom: the test hits the real network/DB/FS, sleeps a fixed sleep,
+     spins up a heavy environment just to check pure logic.
+   - Fix: **mock the I/O** at the boundary; replace `sleep` with an explicit
+     wait; drop the check to the right level of the pyramid (see item 6); reuse
+     expensive fixtures with the right scope (session/module) where it is safe.
+     Measure the time before/after.
+6. **Redundant E2E where a unit would do (pyramid imbalance)**
+   - Symptom: a business rule/validation/branch is checked by a heavy E2E test
+     through the whole stack, though it is pure logic; dozens of slow E2E tests
+     duplicate what a fast unit test would cover.
+   - Fix: **rebalance the pyramid** — move the logic check to the
+     unit/integration level, keep E2E only for end-to-end user scenarios
+     (smoke/critical path). Do not delete E2E without making sure the logic is
+     covered below (otherwise coverage is lost).
+7. **Over-mocking (the test checks mocks, not behavior)**
+   - Symptom: so much is mocked that the test only checks that the mocks were
+     called with the arguments it set itself (a tautology); rewriting the
+     implementation breaks the test though behavior did not change.
+   - Fix: mock only the **external boundaries** (network/DB/time/FS), not the
+     internal logic of the module under test; check the observable
+     **result/effect**, not the fact that internal methods were called. Where
+     appropriate, replace a mock with a real lightweight object/fake.
+8. **Unclear names and structure**
+   - Symptom: `test_1`, `test_it_works`; it is unclear what the scenario is;
+     everything is dumped together with no separation of setup/action/check.
+   - Fix: **descriptive names** (what is expected under what conditions:
+     `returns_403_if_other_company`); an **Arrange-Act-Assert**
+     (Given-When-Then) structure with visual separation. The test name = its
+     specification.
+9. **Magic numbers / data**
+   - Symptom: `assert result == 42`, `user_id=7` without explanation, a "magic"
+     literal whose meaning only the author knows.
+   - Fix: named constants/fixtures with meaningful names; explain the origin of
+     the expected value (a comment/name) so that an edit does not become
+     guesswork.
+10. **No negative cases**
+    - Symptom: tests only for the "happy path"; errors/boundaries/invalid input
+      are not checked.
+    - Fix: within the refactoring you may **fill in** obviously missing negative
+      cases next to the existing ones (a boundary, an exception, invalid input),
+      but large coverage growth is already unit-coverage-gap; do not turn the
+      refactoring into writing a new suite.
+11. **Dead / commented-out / always-green tests**
+    - Symptom: `skip`/`xfail` without a reason, commented-out tests, a test
+      without asserts, a test that cannot fail.
+    - Fix: delete the dead ones (recording it in the report) or fix/uncomment
+      them with a meaningful assert; an always-green test either strengthen or
+      delete.
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ
+## EDGE CASES THAT ARE OFTEN MISSED
 
-- **Параметризация проглотила кейс**: при сведении дублей в таблицу тихо
-  потерялся один вход или один ассерт — покрытие/поведение просело незаметно.
-  Сверяй число логических проверок до/после.
-- **Вынесенный хелпер-ассерт ослаб**: общий хелпер проверяет меньше, чем
-  проверяли исходные копии по отдельности.
-- **Смена scope фикстуры сломала изоляцию**: перевёл фикстуру с function на
-  module/session ради скорости — и получил протечку состояния/flaky.
-- **Удалил E2E, а логика вниз не спустилась** — покрытие формально то же по
-  строкам, но сквозной сценарий больше никто не проверяет.
-- **Убрал «дублирующий» тест, который на самом деле проверял другой кейс** —
-  внешне похож, семантически различен.
-- **Рефакторинг под нестабильным набором**: если тесты уже flaky, «до» и
-  «после» несравнимы — сначала стабилизируй.
-- **Замена мока на реальный объект утащила в тест сеть/БД** — стало «честнее»,
-  но медленнее/нестабильнее; следи за границей.
-- **Снапшот-тесты**: массовое обновление снапшотов «чтоб позеленело» может
-  зафиксировать сломанное поведение как эталон — обновляй осознанно.
-- **Изменил нейминг/структуру файлов — сломал автосбор тестов** раннером
-  (паттерн имён, discovery).
-- **Общий builder с дефолтами скрыл важные различия входов** — тесты стали
-  выглядеть одинаково там, где разница существенна.
-- **Потеря комментария, объяснявшего неочевидный ожидаемый результат** — при
-  переписывании исчезло знание, почему ожидается именно это значение.
+- **Parametrization swallowed a case**: while collapsing duplicates into a
+  table, one input or one assert was silently lost — coverage/behavior sagged
+  unnoticed. Check the number of logical checks before/after.
+- **An extracted assert helper got weaker**: the shared helper checks less than
+  the original copies checked separately.
+- **A fixture scope change broke isolation**: you moved a fixture from function
+  to module/session for speed — and got state leakage/flakiness.
+- **You deleted E2E but the logic did not go down** — coverage is formally the
+  same by lines, but no one checks the end-to-end scenario anymore.
+- **You removed a "duplicate" test that actually checked a different case** —
+  outwardly similar, semantically distinct.
+- **Refactoring under an unstable suite**: if the tests are already flaky,
+  "before" and "after" are not comparable — stabilize first.
+- **Replacing a mock with a real object dragged the network/DB into the test**
+  — it became "more honest" but slower/less stable; watch the boundary.
+- **Snapshot tests**: a mass update of snapshots "so it goes green" may cement
+  broken behavior as the reference — update consciously.
+- **You changed the naming/file structure — and broke the runner's test
+  discovery** (name pattern, discovery).
+- **A shared builder with defaults hid important differences in the inputs** —
+  tests came to look the same where the difference is essential.
+- **Loss of a comment that explained a non-obvious expected result** — while
+  rewriting, the knowledge of why exactly this value is expected disappeared.
 
-## КРИТЕРИИ ГОТОВНОСТИ (DoD)
+## DEFINITION OF DONE (DoD)
 
-- Базовые метрики «до» сняты (число тестов/строк, время прогона, покрытие
-  строк и ветвей) на зелёном наборе.
-- Устранённые анти-паттерны перечислены с file:line и способом фикса.
-- ЧТО проверяется — сохранено: покрытие (строки И ветви) не ниже базового;
-  число логических проверок не уменьшилось скрытно (осознанные удаления мёртвых
-  тестов — отдельным пунктом).
-- Весь набор прогнан после рефакторинга и зелёный; ключевые тесты по-прежнему
-  падают при реальной поломке продукта (проверено мутационным мышлением /
+- The before baseline metrics are taken (test/line count, run time, line and
+  branch coverage) on a green suite.
+- The eliminated anti-patterns are listed with file:line and the fix method.
+- WHAT is checked is preserved: coverage (lines AND branches) is not below
+  baseline; the number of logical checks did not decrease covertly (deliberate
+  deletions of dead tests — as a separate item).
+- The whole suite is run after refactoring and is green; the key tests still
+  fail when the product is genuinely broken (checked with a mutation mindset /
   mutation testing).
-- Метрики «после» сняты и сопоставлены с «до» (меньше дублей/строк, быстрее
-  прогон, покрытие не упало).
-- Рефакторинг в идиомах проекта; не внесён scope creep (новая
-  функциональность/чинка багов продукта — вынесены отдельно).
+- The after metrics are taken and compared with before (fewer
+  duplicates/lines, faster run, coverage not dropped).
+- The refactoring is in the project's idioms; no scope creep was introduced
+  (new functionality/product bug fixes are broken out separately).
 
-## ФОРМАТ ОТЧЁТА
+## REPORT FORMAT
 
-1. **Итог одной фразой**: набор отрефакторен — устранено N анти-паттернов,
-   дубли/строки/время прогона снижены, покрытие сохранено (X% строк / Y
-   ветвей → не ниже).
-2. **SCOPE** — какие тесты рефакторились и как определён периметр; что осталось
-   за периметром.
-3. **Тест-стек и инструмент покрытия** — что определено и какими командами
-   мерилось/прогонялось.
-4. **Метрики до/после** — таблица: число тестов, строк тестового кода,
-   (примерное) число дублей, время прогона, покрытие строк, покрытие ветвей.
-5. **Что изменено и почему** — список правок: file:line, класс анти-паттерна,
-   что сделано, как сохранён инвариант поведения.
-6. **Доказательство сохранения поведения** — прогон «после» зелёный (вывод),
-   покрытие не упало (числа), результат проверки мутационным мышлением/
-   mutation testing на ключевых тестах.
-7. **Осознанные удаления** — какие мёртвые/дублирующие/всегда-зелёные тесты
-   удалены и почему это не потеря покрытия.
-8. **Вынесено отдельно (scope creep, не делалось здесь)** — найденные баги
-   продукта, крупные пробелы покрытия (→ unit-coverage-gap), нестабильность
-   (→ flaky-test-triage).
-9. **Что не удалось проверить** — ограничения (нет окружения для части
-   интеграционных/E2E, mutation testing не настроен и т.п.).
+1. **One-line summary**: the suite is refactored — N anti-patterns eliminated,
+   duplicates/lines/run time reduced, coverage preserved (X% lines / Y branches
+   → not below).
+2. **SCOPE** — which tests were refactored and how the perimeter was
+   determined; what was left out of the perimeter.
+3. **Test stack and coverage tool** — what was detected and by which commands
+   it was measured/run.
+4. **Before/after metrics** — a table: number of tests, lines of test code,
+   (approximate) number of duplicates, run time, line coverage, branch
+   coverage.
+5. **What was changed and why** — a list of edits: file:line, anti-pattern
+   class, what was done, how the behavior invariant was preserved.
+6. **Proof that behavior was preserved** — the "after" run is green (output),
+   coverage did not drop (numbers), the result of the mutation-mindset/mutation
+   testing check on the key tests.
+7. **Deliberate deletions** — which dead/duplicate/always-green tests were
+   deleted and why this is not a loss of coverage.
+8. **Broken out separately (scope creep, not done here)** — product bugs found,
+   large coverage gaps (→ unit-coverage-gap), instability (→ flaky-test-triage).
+9. **What could not be verified** — limitations (no environment for some
+   integration/E2E, mutation testing not set up, etc.).
 
-## ЗАПУСК (практическая инструкция)
+## EXECUTION (practical instructions)
 
-1. САМ, в основном потоке, выполни блок SCOPE — определи набор для
-   рефакторинга из `$ARGUMENTS`/контекста. Не делегируй: субагент не видит
-   контекст диалога. Зафиксируй SCOPE.
-2. САМ определи тест-стек и сними базовые метрики «до» на зелёном прогоне —
-   это опорная точка инварианта.
-3. Проведи инвентаризацию анти-паттернов по SCOPE. Если набор большой и
-   доступен Agent tool — раздели на независимые зоны (по файлам/директориям) и
-   запусти по субагенту на зону. Каждому передай: конкретные пути, определённый
-   тест-стек и команды прогона/покрытия, релевантные разделы этого скилла
-   (каталог анти-паттернов, edge cases, DoD — субагент не видит сам файл) и
-   требование: рефакторить малыми шагами, прогонять набор между шагами, вернуть
-   метрики «до/после» и подтверждение, что покрытие не упало.
-4. Рефактори по одному классу проблем, прогоняя набор между изменениями.
-5. По завершении прогони весь набор SCOPE целиком, перемерь покрытие, сверь с
-   базовыми метриками.
-6. Сведи в отчёт по формату выше. Инвентаризацию и метрики складывай в файл, а
-   не держи только в контексте.
+1. YOURSELF, in the main thread, perform the SCOPE block — determine the suite
+   to refactor from `$ARGUMENTS`/context. Do not delegate: a subagent does not
+   see the dialog context. Record the SCOPE.
+2. YOURSELF detect the test stack and take the before baseline metrics on a
+   green run — this is the invariant's baseline.
+3. Take an inventory of anti-patterns across the SCOPE. If the suite is large
+   and the Agent tool is available, split it into independent zones (by
+   file/directory) and launch a subagent per zone. Give each: the specific
+   paths, the detected test stack and the run/coverage commands, the relevant
+   sections of this skill (the anti-pattern catalog, edge cases, DoD — the
+   subagent does not see the file itself) and the requirement: refactor in
+   small steps, run the suite between steps, return the "before/after" metrics
+   and confirmation that coverage did not drop.
+4. Refactor one problem class at a time, running the suite between changes.
+5. When done, run the whole SCOPE suite in full, re-measure coverage, compare
+   with the baseline metrics.
+6. Consolidate into a report per the format above. Store the inventory and
+   metrics in a file, not only in context.
 
-Это авторский скилл: правь тесты так, чтобы сохранить проверяемое поведение и
-покрытие, сделать тесты читаемыми, быстрыми и устойчивыми в идиомах проекта.
-Если рефакторинг вскрыл реальный баг продукта — не «замазывай» его подгонкой
-теста, вынеси отдельным пунктом.
+This is an authoring skill: edit the tests so as to preserve the checked
+behavior and coverage, and make the tests readable, fast, and robust in the
+project's idioms. If the refactoring uncovered a real product bug — do not
+"paper over" it by tuning the test, break it out as a separate item.
+

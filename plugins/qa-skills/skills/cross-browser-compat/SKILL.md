@@ -1,268 +1,277 @@
 ---
 name: cross-browser-compat
-description: Проверка кросс-браузерной и адаптивной (responsive) совместимости веб-интерфейса — периметр из фичи/экрана/директории/ветки, документа-требований или issue в трекере; проверка по матрице браузеров/устройств и брейкпоинтам (mobile/tablet/desktop) с обязательным живым прогоном в браузере через эмуляцию разных вьюпортов и user-agent, анализ поддержки используемых CSS-фич и JS-API (caniuse-логика), touch vs mouse, нативных контролов, тёмной темы и зума. Каждая находка привязана к конкретному браузеру/устройству/брейкпоинту, file:line и сценарию, с явным вердиктом совместимости. Используй когда просят проверить работу в разных браузерах, провести кросс-браузерное тестирование, оценить работу в Safari/Firefox/Edge, проверить адаптивность/мобильную вёрстку/responsive, разобраться почему ломается на мобильном или планшете — даже без слова "тестирование", например "заработает ли это в сафари", "не поедет ли вёрстка на телефоне", "поддерживается ли этот CSS везде", "нормально ли на планшете", "почему на iOS кнопка не нажимается". Скилл только анализирует и сохраняет отчёт-файл, код проекта не меняет.
-argument-hint: "[путь к фиче/экрану/директории/ветке, путь к документу-требований, или issue ID/ссылка; опционально целевая матрица браузеров/устройств]"
+description: Cross-browser and responsive compatibility check of a web interface — scope from a feature/screen/directory/branch, a requirements document, or a tracker issue; checking against a browser/device matrix and breakpoints (mobile/tablet/desktop) with a mandatory live run in the browser via emulation of different viewports and user-agents, analysis of support for the CSS features and JS APIs used (caniuse logic), touch vs mouse, native controls, dark theme, and zoom. Every finding is tied to a specific browser/device/breakpoint, file:line, and a scenario, with an explicit compatibility verdict. Use when asked to check behavior in different browsers, run cross-browser testing, assess how it works in Safari/Firefox/Edge, check responsiveness/mobile layout/responsive, or figure out why it breaks on mobile or tablet — even without the word "testing", e.g. "will this work in safari", "won't the layout fall apart on a phone", "is this CSS supported everywhere", "is it fine on a tablet", "why doesn't the button tap on iOS". The skill only analyzes and saves a report file; it does not change project code.
+argument-hint: "[path to feature/screen/directory/branch, path to requirements document, or issue ID/link; optionally the target browser/device matrix]"
 disallowed-tools: Edit
 ---
 
-# Кросс-браузерная и адаптивная совместимость (cross-browser / responsive)
+# Cross-browser and responsive compatibility (cross-browser / responsive)
 
-Ты аудитор совместимости. Твоя задача — найти всё, что заставит интерфейс
-выглядеть или работать по-разному (или сломанно) в разных браузерах, на разных
-устройствах и при разных размерах экрана: неподдерживаемые CSS-фичи и JS-API,
-поломки вёрстки на брейкпоинтах, различия нативных контролов, проблемы touch vs
-mouse. Дисциплина — evidence over assertion: каждая находка привязана к
-КОНКРЕТНОМУ браузеру/устройству/брейкпоинту, file:line и сценарию. Обязателен
-ЖИВОЙ прогон: реально подними приложение и через Claude Browser MCP проверь его
-на разных вьюпортах (и, где возможно, user-agent), а не только читай CSS.
+You are a compatibility auditor. Your task is to find everything that would make
+the interface look or behave differently (or broken) in different browsers, on
+different devices, and at different screen sizes: unsupported CSS features and JS
+APIs, layout breakage at breakpoints, differences in native controls, touch vs
+mouse issues. The discipline is evidence over assertion: every finding is tied to a
+SPECIFIC browser/device/breakpoint, file:line, and a scenario. A LIVE run is
+mandatory: actually bring up the app and, via the Claude Browser MCP, check it at
+different viewports (and, where possible, user-agents), not just read the CSS.
 
-Скилл проект-агностичен. Сначала определи стек (CSS-препроцессор/Tailwind/
-CSS-in-JS/UI-фреймворк, сборщик и его таргеты, наличие Autoprefixer/PostCSS/
-Babel/polyfill-стратегии) и как поднять приложение. Если объём большой и доступен
-Agent tool — раздели по экранам/брейкпоинтам между субагентами (см. «Запуск»).
+The skill is project-agnostic. First detect the stack (CSS preprocessor/Tailwind/
+CSS-in-JS/UI framework, the bundler and its targets, presence of Autoprefixer/
+PostCSS/Babel/polyfill strategy) and how to bring up the app. If the scope is large
+and the Agent tool is available — split it across subagents by screen/breakpoint
+(see "Running it").
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (как определить периметр)
+## INPUT / SCOPE (how to determine the perimeter)
 
-Периметр: `$ARGUMENTS`. Определи режим входа и построй SCOPE. Периметр шире
-буквального входа: включай общие компоненты/лейаут/глобальные стили, которые
-использует проверяемый экран, — поломка в общем компоненте видна на всех
-страницах.
+Scope: `$ARGUMENTS`. Determine the input mode and build the SCOPE. The scope is
+broader than the literal input: include the shared components/layout/global styles
+that the screen under review uses — breakage in a shared component is visible on
+all pages.
 
-**A. КОД: фича / экран / директория / ветка / diff / весь фронтенд.** Периметр =
-содержимое директории (или `git diff --stat` относительно базовой ветки) +
-общие стили/лейаут/компоненты, которые она использует + URL экранов для живого
-прогона.
+**A. CODE: feature / screen / directory / branch / diff / whole frontend.** Scope =
+the directory contents (or `git diff --stat` against the base branch) + the shared
+styles/layout/components it uses + the URLs of screens for the live run.
 
-**B. ДОКУМЕНТ: требования / ТЗ / дизайн-спека (.md/.txt/.docx).** Прочитай
-целиком. Извлеки: целевую матрицу браузеров/устройств, брейкпоинты, требования к
-мобильной версии/адаптиву, поддержку тёмной темы. Сопоставь с кодом — требование
-«поддержка Safari 15», а в коде используется `:has()`/container queries без
-фолбэка — находка.
+**B. DOCUMENT: requirements / spec / design spec (.md/.txt/.docx).** Read it in
+full. Extract: the target browser/device matrix, breakpoints, requirements for the
+mobile version/responsiveness, dark-theme support. Match against the code — a
+requirement "support Safari 15" while the code uses `:has()`/container queries with
+no fallback is a finding.
 
-**C. ISSUE в трекере (Jira/YouTrack/GitHub/Linear: ID или ссылка).** Получи
-текст issue через доступную интеграцию (MCP-инструмент, если подключён; иначе
-запроси у пользователя). Найди связанные коммиты (`git log --all --grep=<ID>
---oneline`, `git show --stat`), построй список затронутых экранов.
+**C. ISSUE in a tracker (Jira/YouTrack/GitHub/Linear: ID or link).** Get the issue
+text via an available integration (an MCP tool, if connected; otherwise ask the
+user). Find the related commits (`git log --all --grep=<ID> --oneline`,
+`git show --stat`), and build the list of affected screens.
 
-Если периметр неоднозначен — уточни у автора, не проверяй наугад весь фронтенд.
-Зафиксируй итоговый SCOPE (файлы, экраны/URL, целевая матрица) в начале отчёта.
+If the scope is ambiguous — check with the author; do not check the whole frontend
+at random. Record the final SCOPE (files, screens/URLs, target matrix) at the start
+of the report.
 
-### Определи целевую МАТРИЦУ браузеров/устройств
-Не проверяй наугад «все браузеры». Определи реальную цель проекта:
-- **browserslist** (в package.json/`.browserslistrc`) — первоисточник целевых
-  браузеров; `npx browserslist` покажет разрешённый список.
-- Аналитика/README/требования — если указана доля аудитории по браузерам/
-  устройствам.
-- Если ничего нет — **дефолтная матрица**: свежие Chrome, Firefox, Safari, Edge
-  (desktop) + мобильные Safari (iOS) и Chrome (Android). Подтверди у пользователя.
-- Определи целевые **брейкпоинты** из CSS проекта (media queries / конфиг
-  Tailwind), а не выдумывай; дефолт для эмуляции: mobile ~375×812, tablet
-  ~768×1024, desktop ~1440.
+### Determine the target browser/device MATRIX
+Do not check "all browsers" at random. Determine the project's real target:
+- **browserslist** (in package.json/`.browserslistrc`) — the primary source of
+  target browsers; `npx browserslist` will show the resolved list.
+- Analytics/README/requirements — if an audience share by browser/device is stated.
+- If there is nothing — the **default matrix**: recent Chrome, Firefox, Safari,
+  Edge (desktop) + mobile Safari (iOS) and Chrome (Android). Confirm with the user.
+- Determine the target **breakpoints** from the project's CSS (media queries /
+  Tailwind config), do not make them up; the default for emulation: mobile
+  ~375×812, tablet ~768×1024, desktop ~1440.
 
-## КЛЮЧЕВОЙ ПРИНЦИП: «работает у меня в Chrome» ≠ «работает везде»
-Проверяй адверсариально:
-1. Не считай CSS/JS-фичу безопасной по памяти — сверься с реальной поддержкой в
-   целевых браузерах (caniuse-логика) для КАЖДОЙ нетривиальной фичи, особенно
-   свежих (`:has()`, container queries, `subgrid`, flex `gap` в старом Safari,
+## KEY PRINCIPLE: "works for me in Chrome" ≠ "works everywhere"
+Check adversarially:
+1. Do not assume a CSS/JS feature is safe from memory — cross-check the real support
+   in the target browsers (caniuse logic) for EVERY nontrivial feature, especially
+   recent ones (`:has()`, container queries, `subgrid`, flex `gap` in old Safari,
    `text-wrap: balance`, `backdrop-filter`, `dialog`, `Intl.Segmenter`,
    `structuredClone`, `Array.at`, top-level await).
-2. Не считай, что Autoprefixer/Babel закрывают всё — проверь, что фича реально
-   попадает под таргеты сборки и что для рантайм-API есть полифилл, а не только
-   транспиляция синтаксиса.
-3. Не проверяй адаптив ресайзом окна на одном брейкпоинте — пройди ВСЕ
-   брейкпоинты и границы между ними (где ломается чаще всего).
-4. Не полагайся на `:hover` как единственный способ показать контент — на тач-
-   устройствах hover не срабатывает.
-5. Формулируй статус явно: «не поддерживается в браузере X» / «поддерживается,
-   но без фолбэка деградирует» / «работает во всей матрице».
+2. Do not assume Autoprefixer/Babel covers everything — verify that the feature
+   actually falls within the build targets and that a runtime API has a polyfill,
+   not just syntax transpilation.
+3. Do not check responsiveness by resizing the window at one breakpoint — go through
+   ALL breakpoints and the boundaries between them (where it breaks most often).
+4. Do not rely on `:hover` as the only way to reveal content — on touch devices
+   hover does not fire.
+5. State the status explicitly: "not supported in browser X" / "supported, but
+   degrades without a fallback" / "works across the whole matrix".
 
-## МЕТОДОЛОГИЯ: ТРИ НЕЗАВИСИМЫХ СРЕЗА (в границах SCOPE)
+## METHODOLOGY: THREE INDEPENDENT PASSES (within the SCOPE)
 
-### СРЕЗ 1 — Инструментальный / статический анализ поддержки
-- Прогони `npx browserslist` — зафиксируй целевые браузеры.
-- Если есть — `eslint-plugin-compat` / `stylelint` с проверкой поддержки,
-  `browserslist-lint`, отчёт Autoprefixer. Цель — автоматически выявить
-  использование фич вне таргетов.
-- `grep`/анализ по SCOPE на нетривиальные CSS-свойства и JS-API (см. блок 3–4
-  чек-листа) и сверка их поддержки с целевой матрицей по caniuse-данным.
-- Проверь конфиг сборки: таргеты Babel/`browserslist`, наличие полифиллов
-  (core-js/`@babel/preset-env` с `useBuiltIns`), Autoprefixer в PostCSS.
+### PASS 1 — Tooling / static support analysis
+- Run `npx browserslist` — record the target browsers.
+- If available — `eslint-plugin-compat` / `stylelint` with support checking,
+  `browserslist-lint`, the Autoprefixer report. Goal — automatically detect use of
+  features outside the targets.
+- `grep`/analyze the SCOPE for nontrivial CSS properties and JS APIs (see checklist
+  blocks 3–4) and cross-check their support against the target matrix using caniuse
+  data.
+- Check the build config: Babel/`browserslist` targets, presence of polyfills
+  (core-js/`@babel/preset-env` with `useBuiltIns`), Autoprefixer in PostCSS.
 
-### СРЕЗ 2 — Ручной построчный разбор кода
-Пройди файлы SCOPE построчно по чек-листу. Для каждой находки — file:line,
-затронутый браузер/устройство, сценарий.
+### PASS 2 — Manual line-by-line code review
+Go through the SCOPE files line by line against the checklist. For each finding —
+file:line, the affected browser/device, scenario.
 
-### СРЕЗ 3 — ЖИВОЙ прогон в браузере (обязателен)
-Реально подними приложение (штатная dev-команда из package.json/README или
-указанный стенд) и через Claude Browser MCP проверь ключевые экраны:
-- **Брейкпоинты**: эмулируй mobile / tablet / desktop (resize вьюпорта) и
-  границы между ними — проверь вёрстку, overflow, обрезку, наезд, читаемость,
-  работоспособность меню/навигации (гамбургер), таблиц (горизонтальный скролл).
-- **User-agent / мобильная эмуляция**: где инструмент позволяет — эмулируй
-  мобильный UA (тач, отсутствие hover), проверь touch-взаимодействия и размеры
-  таргетов; проверь ориентацию portrait/landscape.
-- **Тёмная/светлая тема**: эмулируй `prefers-color-scheme` в обе стороны —
-  контраст, читаемость, отсутствие «белых вспышек».
-- **Зум**: 200% — вёрстка не рассыпается.
-- **Консоль и сеть**: сними ошибки консоли (`read_console_messages`) — JS-ошибка
-  от неподдержанного API проявится тут; проверь, что ассеты/шрифты грузятся.
-- **ЯВНО зафиксируй ограничение**: Claude Browser — это, как правило, движок
-  Chromium. Реальные Safari (WebKit) и Firefox (Gecko) так не проверить —
-  эмуляция вьюпорта/UA НЕ заменяет реальный движок. Различия рендеринга WebKit/
-  Gecko (flex gap, date input, `-webkit-` префиксы, backdrop-filter, обработка
-  `100vh` на iOS) — выяви анализом кода (СРЕЗ 1–2) и пометь как «требует проверки
-  на реальном Safari/Firefox», а не выдавай за проверенное.
+### PASS 3 — LIVE run in the browser (mandatory)
+Actually bring up the app (the standard dev command from package.json/README or the
+specified environment) and, via the Claude Browser MCP, check the key screens:
+- **Breakpoints**: emulate mobile / tablet / desktop (viewport resize) and the
+  boundaries between them — check the layout, overflow, clipping, collision,
+  readability, whether the menu/navigation (hamburger) works, tables (horizontal
+  scroll).
+- **User-agent / mobile emulation**: where the tool allows — emulate a mobile UA
+  (touch, no hover), check touch interactions and target sizes; check portrait/
+  landscape orientation.
+- **Dark/light theme**: emulate `prefers-color-scheme` both ways — contrast,
+  readability, absence of "white flashes".
+- **Zoom**: 200% — the layout does not fall apart.
+- **Console and network**: capture console errors (`read_console_messages`) — a JS
+  error from an unsupported API surfaces here; verify that assets/fonts load.
+- **EXPLICITLY record the limitation**: Claude Browser is, as a rule, a Chromium
+  engine. Real Safari (WebKit) and Firefox (Gecko) cannot be checked this way —
+  viewport/UA emulation does NOT replace the real engine. Rendering differences of
+  WebKit/Gecko (flex gap, date input, `-webkit-` prefixes, backdrop-filter,
+  handling of `100vh` on iOS) — surface them by code analysis (PASS 1–2) and flag
+  them as "requires verification on a real Safari/Firefox", rather than presenting
+  them as verified.
 
-## ЧЕК-ЛИСТ ПО КАТЕГОРИЯМ (применяй релевантные SCOPE)
+## CHECKLIST BY CATEGORY (apply the ones relevant to the SCOPE)
 
-1. **Матрица и брейкпоинты.** Целевые браузеры/устройства определены (не
-   «наугад»); есть media queries на все целевые брейкпоинты; нет «мёртвой зоны»
-   между брейкпоинтами, где вёрстка ломается; используется responsive-подход
-   (`%`/`fr`/`clamp()`/`min-max`), а не фиксированные пиксели под один экран.
-2. **Вёрстка и overflow.** Нет горизонтального скролла на мобильном (элемент шире
-   вьюпорта); длинный текст/URL переносится (`overflow-wrap`/`word-break`);
-   таблицы и широкие блоки скроллятся внутри контейнера, а не растягивают body;
-   абсолютно позиционированные элементы не уезжают за экран; `100vh` на iOS не
-   режется адресной строкой (используется `100dvh`/`svh` или JS-фолбэк).
-3. **CSS-фичи и их поддержка.** Для каждой нетривиальной фичи проверь поддержку в
-   целевых браузерах и наличие фолбэка: `:has()`, container queries, `subgrid`,
-   flex/grid `gap` (старый Safari <14.1 не поддерживал gap во flex),
-   `aspect-ratio`, `backdrop-filter`, `text-wrap: balance/pretty`, `inset`,
-   логические свойства, `@supports`-фолбэки, кастомные свойства с fallback,
-   `clamp()`/`min()`/`max()`, `position: sticky` (нюансы в Safari), вендорные
-   префиксы там, где нужны.
-4. **JS-API и полифиллы.** Для рантайм-API проверь поддержку и полифилл (не
-   только транспиляцию): `Intl.*` (Segmenter, DisplayNames), `structuredClone`,
+1. **Matrix and breakpoints.** The target browsers/devices are defined (not "at
+   random"); there are media queries for all target breakpoints; there is no "dead
+   zone" between breakpoints where the layout breaks; a responsive approach is used
+   (`%`/`fr`/`clamp()`/`min-max`) rather than fixed pixels for one screen.
+2. **Layout and overflow.** No horizontal scroll on mobile (an element wider than
+   the viewport); long text/URLs wrap (`overflow-wrap`/`word-break`); tables and
+   wide blocks scroll inside their container rather than stretching the body;
+   absolutely positioned elements do not drift off screen; `100vh` on iOS is not cut
+   by the address bar (`100dvh`/`svh` or a JS fallback is used).
+3. **CSS features and their support.** For each nontrivial feature, check support in
+   the target browsers and the presence of a fallback: `:has()`, container queries,
+   `subgrid`, flex/grid `gap` (old Safari <14.1 did not support gap in flex),
+   `aspect-ratio`, `backdrop-filter`, `text-wrap: balance/pretty`, `inset`, logical
+   properties, `@supports` fallbacks, custom properties with a fallback,
+   `clamp()`/`min()`/`max()`, `position: sticky` (nuances in Safari), vendor
+   prefixes where needed.
+4. **JS APIs and polyfills.** For a runtime API, check support and the polyfill (not
+   just transpilation): `Intl.*` (Segmenter, DisplayNames), `structuredClone`,
    `Array.prototype.at/findLast`, `Object.hasOwn`, `ResizeObserver`/
-   `IntersectionObserver`, `dialog` element, `URLPattern`, `navigator.share`,
-   `crypto.randomUUID`, top-level await, optional chaining в старых движках,
-   `fetch`/`AbortController`. Есть ли graceful degradation, если API нет.
-5. **Touch vs mouse.** Контент/действия, доступные только по `:hover` (тултип,
-   подменю, кнопки в строке при наведении), имеют тач-альтернативу; размеры
-   тач-таргетов достаточны (≥44×44px рекомендуемо, минимум ~24px) и не впритык;
-   нет зависимости от `mouseover`/`mouseout` без `touch`/`pointer`-эквивалента;
-   `pointer-events`/`touch-action` корректны для скролла/жестов;
-   click-delay/double-tap zoom не мешает (`touch-action: manipulation`).
-6. **Viewport и ориентация.** Есть корректный `<meta name="viewport">` (без
-   `maximum-scale=1`/`user-scalable=no`, блокирующего зум — это ещё и a11y);
-   layout переживает смену portrait↔landscape; учтён safe-area (вырез/челка) на
-   мобильных (`env(safe-area-inset-*)`).
-7. **Формы и нативные контролы.** Различия рендеринга и поведения между
-   браузерами: `<input type="date/time/color/range/number">` (в Safari/Firefox
-   выглядят и работают иначе, чем в Chrome), `<select>` (нативная отрисовка
-   различается), кастомные чекбоксы/радио, `placeholder`, автозаполнение,
-   виртуальная клавиатура на мобильном (тип клавиатуры по `inputmode`/`type`),
-   `accept`/`capture` у file input на iOS.
-8. **Медиа и форматы.** Форматы изображений с фолбэком (`<picture>`/`srcset`:
-   WebP/AVIF не везде; `<source>` порядок), видео/аудио кодеки по браузеру
-   (`<source type>` + фолбэк), шрифты (`font-display`, форматы woff2, фолбэк-
-   стек), иконочные шрифты vs SVG.
-9. **Производительность на слабых мобильных.** Тяжёлые анимации/тени/фильтры
-   (`box-shadow`, `filter`, `backdrop-filter`) на слабом GPU; размер бандла/
-   картинок на мобильном канале; отсутствие layout thrashing; ленивая загрузка
-   тяжёлого контента.
-10. **Тёмная/светлая тема.** `prefers-color-scheme` поддержан; нет захардкоженных
-    цветов, ломающих тему; отсутствие «вспышки» неправильной темы при загрузке;
-    контраст сохраняется в обеих темах.
-11. **Зум и масштаб текста.** 200% зум и увеличенный системный размер шрифта не
-    ломают вёрстку (единицы `rem`/`em`, а не жёсткие `px` под текст); ничего не
-    обрезается.
+   `IntersectionObserver`, the `dialog` element, `URLPattern`, `navigator.share`,
+   `crypto.randomUUID`, top-level await, optional chaining in old engines,
+   `fetch`/`AbortController`. Whether there is graceful degradation if the API is
+   absent.
+5. **Touch vs mouse.** Content/actions available only on `:hover` (tooltip, submenu,
+   buttons in a row on hover) have a touch alternative; touch target sizes are
+   sufficient (≥44×44px recommended, minimum ~24px) and not crammed together; no
+   dependence on `mouseover`/`mouseout` without a `touch`/`pointer` equivalent;
+   `pointer-events`/`touch-action` are correct for scrolling/gestures; a
+   click-delay/double-tap zoom does not interfere (`touch-action: manipulation`).
+6. **Viewport and orientation.** There is a correct `<meta name="viewport">`
+   (without `maximum-scale=1`/`user-scalable=no` that blocks zoom — that is also an
+   a11y issue); the layout survives a portrait↔landscape switch; the safe area
+   (notch) on mobile is accounted for (`env(safe-area-inset-*)`).
+7. **Forms and native controls.** Rendering and behavior differences between
+   browsers: `<input type="date/time/color/range/number">` (in Safari/Firefox they
+   look and work differently than in Chrome), `<select>` (native rendering differs),
+   custom checkboxes/radios, `placeholder`, autofill, the virtual keyboard on mobile
+   (keyboard type from `inputmode`/`type`), `accept`/`capture` on a file input on
+   iOS.
+8. **Media and formats.** Image formats with a fallback (`<picture>`/`srcset`:
+   WebP/AVIF not everywhere; `<source>` order), video/audio codecs by browser
+   (`<source type>` + fallback), fonts (`font-display`, woff2 formats, a fallback
+   stack), icon fonts vs SVG.
+9. **Performance on low-end mobiles.** Heavy animations/shadows/filters
+   (`box-shadow`, `filter`, `backdrop-filter`) on a weak GPU; bundle/image size on a
+   mobile connection; absence of layout thrashing; lazy loading of heavy content.
+10. **Dark/light theme.** `prefers-color-scheme` is supported; no hardcoded colors
+    that break the theme; no "flash" of the wrong theme on load; contrast is
+    preserved in both themes.
+11. **Zoom and text scaling.** 200% zoom and an enlarged system font size do not
+    break the layout (`rem`/`em` units, not hard `px` for text); nothing is clipped.
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ
-- `gap` во flex-контейнере — не работает в Safari < 14.1, элементы слипаются.
-- `100vh` на iOS Safari включает адресную строку → нижняя часть контента
-  обрезана; нужен `100dvh`/`-webkit-fill-available`/JS.
-- `:hover`-меню/тултип полностью недоступны на тач — функционал теряется на
-  мобильных.
-- `<input type="date">` отрисован кастомно под Chrome, а в Safari/Firefox
-  выглядит иначе или показывает нативный пикер — «дизайн уехал».
-- `position: sticky` внутри контейнера с `overflow` ведёт себя по-разному в
+## EDGE CASES THAT ARE OFTEN MISSED
+- `gap` in a flex container — does not work in Safari < 14.1, the elements stick
+  together.
+- `100vh` on iOS Safari includes the address bar → the bottom part of the content is
+  clipped; you need `100dvh`/`-webkit-fill-available`/JS.
+- `:hover` menus/tooltips are completely inaccessible on touch — the functionality
+  is lost on mobile.
+- `<input type="date">` is rendered custom for Chrome, while in Safari/Firefox it
+  looks different or shows the native picker — "the design drifted".
+- `position: sticky` inside a container with `overflow` behaves differently in
   Safari.
-- Autoprefixer не добавляет префикс, потому что фича вне browserslist-таргетов —
-  а реальная аудитория шире таргетов.
-- WebP/AVIF без `<picture>`-фолбэка → на старом Safari пустой квадрат.
-- `backdrop-filter` без `-webkit-` префикса не работает в Safari; без фолбэка
-  фон нечитаем.
-- «Мёртвая зона» между брейкпоинтами (например 768–900px) — сверстано под 375 и
-  1440, посередине наезжает.
-- Горизонтальный скролл всего body из-за одного элемента с `width: 100vw` +
-  padding (не учтён скроллбар) или `min-width` у грид-элемента.
-- `user-scalable=no` в viewport — ломает зум (доступность) и иногда сам layout.
-- Виртуальная клавиатура на мобильном перекрывает поле ввода/кнопку сабмита
-  (нет прокрутки к активному полю).
-- Тёмная тема: иконка/логотип-PNG на прозрачном фоне становится невидимым.
-- Ошибка JS от неподдержанного API (`structuredClone`, `Array.at`) валит весь
-  экран только в старом браузере — в свежем Chrome не воспроизводится.
-- `date`/`number` input: формат ввода и парсинг зависят от локали ОС и браузера.
+- Autoprefixer does not add a prefix because the feature is outside the browserslist
+  targets — while the real audience is broader than the targets.
+- WebP/AVIF without a `<picture>` fallback → an empty square on old Safari.
+- `backdrop-filter` without the `-webkit-` prefix does not work in Safari; without a
+  fallback the background is unreadable.
+- A "dead zone" between breakpoints (e.g. 768–900px) — laid out for 375 and 1440, in
+  between things collide.
+- Horizontal scroll of the whole body because of one element with `width: 100vw` +
+  padding (the scrollbar not accounted for) or `min-width` on a grid item.
+- `user-scalable=no` in the viewport — breaks zoom (accessibility) and sometimes the
+  layout itself.
+- The virtual keyboard on mobile covers the input field/submit button (no scroll to
+  the active field).
+- Dark theme: an icon/logo PNG on a transparent background becomes invisible.
+- A JS error from an unsupported API (`structuredClone`, `Array.at`) takes down the
+  whole screen only in an old browser — it does not reproduce in recent Chrome.
+- `date`/`number` input: the input format and parsing depend on the OS and browser
+  locale.
 
-## ШКАЛА SEVERITY
-Для каждой находки указывай конкретный браузер/устройство/брейкпоинт.
-- **Critical** — функциональность недоступна на целевом браузере/устройстве
-  (JS-ошибка валит экран в Safari; кнопка сабмита недостижима на мобильном;
-  контент полностью обрезан).
-- **High** — серьёзная поломка UX на целевой конфигурации: сломанная вёрстка/
-  наезд на ключевом экране, горизонтальный скролл, недоступный по тачу основной
-  сценарий, критичная фича без фолбэка в целевом браузере.
-- **Medium** — заметная, но не блокирующая проблема: косметическое расхождение
-  рендеринга, неоптимальный контрол на второстепенном пути, проблема на
-  граничном брейкпоинте.
-- **Low** — best practice/минорное расхождение без сценария поломки в целевой
-  матрице (нет фолбэка для браузера вне таргетов).
+## SEVERITY SCALE
+For each finding, state the specific browser/device/breakpoint.
+- **Critical** — functionality is unavailable on a target browser/device (a JS error
+  takes down the screen in Safari; the submit button is unreachable on mobile;
+  content is fully clipped).
+- **High** — a serious UX breakage on a target configuration: broken layout/
+  collision on a key screen, horizontal scroll, a main scenario unreachable by
+  touch, a critical feature with no fallback in a target browser.
+- **Medium** — a noticeable but non-blocking problem: a cosmetic rendering
+  difference, a suboptimal control on a secondary path, a problem at a boundary
+  breakpoint.
+- **Low** — best practice / a minor difference with no breakage scenario in the
+  target matrix (no fallback for a browser outside the targets).
 
-Вердикт: совместимо со всей целевой матрицей / совместимо с оговорками / не
-совместимо (перечисли блокеры и на каких браузерах/устройствах).
+Verdict: compatible with the whole target matrix / compatible with caveats / not
+compatible (list the blockers and on which browsers/devices).
 
-## ФОРМАТ ОТЧЁТА
-1. **Executive summary** (без жаргона): работает ли интерфейс на целевых
-   браузерах и устройствах, где ломается, что чинить первым.
-2. **SCOPE и матрица** — проверенные файлы/экраны, целевая матрица браузеров/
-   устройств/брейкпоинтов, что осталось за периметром.
-3. **Вердикт одной фразой** в начале.
-4. **Матрица покрытия** — что проверено живым прогоном (какие вьюпорты/UA/темы),
-   что только статическим анализом, и ЯВНО: что НЕ проверено на реальном движке
-   (Safari/WebKit, Firefox/Gecko, реальные устройства) — это ограничение
-   эмуляции, а не пропуск.
-5. **Список находок**: ID, file:line (и/или URL+элемент), браузер/устройство/
-   брейкпоинт, сценарий, severity, рекомендация; где уместно — краткое описание/
-   скриншот из живого прогона.
-6. **Что сделано хорошо** — сильные паттерны адаптива/фолбэков для тиражирования.
-7. **План действий**: блокеры vs. отложенное; отдельно — что требует ручной
-   проверки на реальном Safari/Firefox/устройстве (BrowserStack/реальный девайс),
-   раз эмуляция это не покрывает.
-8. **Что не проверено** — ограничения (нет реального WebKit/Gecko, нет реальных
-   устройств, не все брейкпоинты, headless).
+## REPORT FORMAT
+1. **Executive summary** (no jargon): does the interface work on the target browsers
+   and devices, where it breaks, what to fix first.
+2. **SCOPE and matrix** — the files/screens checked, the target browser/device/
+   breakpoint matrix, what was left out of scope.
+3. **One-line verdict** up front.
+4. **Coverage matrix** — what was checked by a live run (which viewports/UAs/
+   themes), what only by static analysis, and EXPLICITLY: what was NOT checked on a
+   real engine (Safari/WebKit, Firefox/Gecko, real devices) — this is a limitation
+   of emulation, not an omission.
+5. **List of findings**: ID, file:line (and/or URL+element), browser/device/
+   breakpoint, scenario, severity, recommendation; where appropriate — a short
+   description/screenshot from the live run.
+6. **What was done well** — strong responsive/fallback patterns worth replicating.
+7. **Action plan**: blockers vs. deferred; separately — what requires manual
+   verification on a real Safari/Firefox/device (BrowserStack/a real device), since
+   emulation does not cover it.
+8. **What was not checked** — limitations (no real WebKit/Gecko, no real devices,
+   not all breakpoints, headless).
 
-## ПРАВИЛА ОФОРМЛЕНИЯ НАХОДОК
-Перед началом проверь, нет ли отчёта по этому периметру в `docs/qa/cross-browser/`
-— если есть, продолжи нумерацию ID и обнови статусы, а не пересоздавай.
-Для каждой находки:
-- Стабильный ID: `XBROWSER-<scope-slug>-001`.
-- file:line (и/или URL + элемент/селектор).
-- Конкретный браузер/устройство/брейкпоинт и сценарий: «на iOS Safari нижняя
-  панель обрезается из-за `height: 100vh` (line 42)» — не абстрактно.
-- Severity с обоснованием (где и что ломается).
-- Конкретная рекомендация («заменить `100vh` на `100dvh` с фолбэком»,
-  «добавить `<picture>` с JPEG-фолбэком для WebP», «добавить тач-альтернативу
-  hover-меню», «добавить `-webkit-` префикс к backdrop-filter»).
-Сохрани отчёт в `docs/qa/cross-browser/<scope-slug>.md` (следуй существующей
-структуре репозитория; `docs/qa/...` — дефолт).
+## RULES FOR WRITING UP FINDINGS
+Before you start, check whether a report for this scope exists in
+`docs/qa/cross-browser/` — if so, continue the ID numbering and update statuses
+rather than recreating it.
+For each finding:
+- A stable ID: `XBROWSER-<scope-slug>-001`.
+- file:line (and/or URL + element/selector).
+- The specific browser/device/breakpoint and scenario: "on iOS Safari the bottom
+  bar is clipped because of `height: 100vh` (line 42)" — not in the abstract.
+- Severity with justification (where and what breaks).
+- A concrete recommendation ("replace `100vh` with `100dvh` and a fallback", "add a
+  `<picture>` with a JPEG fallback for WebP", "add a touch alternative to the hover
+  menu", "add a `-webkit-` prefix to backdrop-filter").
+Save the report to `docs/qa/cross-browser/<scope-slug>.md` (follow the existing
+repository structure; `docs/qa/...` is the default).
 
-## ЗАПУСК (практическая инструкция)
-1. САМ в основном потоке определи SCOPE и целевую матрицу (раздел «Входные
-   данные») — не делегируй, субагент не видит контекст диалога. Определи стек,
-   таргеты сборки, как поднять приложение, URL экранов.
-2. Проверь, нет ли предыдущего отчёта в `docs/qa/cross-browser/`.
-3. Прогони СРЕЗ 1 (`npx browserslist`, compat-линтеры, grep на нетривиальные
-   фичи + сверка с caniuse-логикой, проверка полифилл-стратегии сборки).
-4. Проведи СРЕЗ 2 (построчный разбор по чек-листу) и СРЕЗ 3 (живой прогон:
-   эмуляция брейкпоинтов, мобильного UA, тёмной темы, зума, снятие ошибок
-   консоли). Явно отдели проверенное эмуляцией от того, что требует реального
-   Safari/Firefox/устройства. Если экранов много и доступен Agent tool — раздели
-   по экранам/брейкпоинтам между субагентами; каждому передай конкретные
-   URL/пути, целевую матрицу, чек-лист, шкалу severity, формат находки (субагент
-   не видит этот файл). Пиши подтверждённые находки в промежуточный файл.
-5. Сведи три среза в отчёт, сохрани в `docs/qa/cross-browser/<scope-slug>.md`.
-6. Явно перечисли, что не проверено (особенно реальные движки/устройства).
+## RUNNING IT (practical instructions)
+1. Determine the SCOPE and target matrix YOURSELF in the main thread (see "Input") —
+   do not delegate; a subagent does not see the conversation context. Determine the
+   stack, the build targets, how to bring up the app, the URLs of the screens.
+2. Check whether a previous report exists in `docs/qa/cross-browser/`.
+3. Run PASS 1 (`npx browserslist`, compat linters, grep for nontrivial features +
+   cross-check with caniuse logic, check the build's polyfill strategy).
+4. Carry out PASS 2 (line-by-line review against the checklist) and PASS 3 (live
+   run: emulation of breakpoints, mobile UA, dark theme, zoom, capturing console
+   errors). Explicitly separate what was verified by emulation from what requires a
+   real Safari/Firefox/device. If there are many screens and the Agent tool is
+   available — split it across subagents by screen/breakpoint; give each one the
+   concrete URLs/paths, the target matrix, the checklist, the severity scale, and
+   the finding format (the subagent does not see this file). Write confirmed
+   findings into an interim file.
+5. Merge the three passes into the report, save to
+   `docs/qa/cross-browser/<scope-slug>.md`.
+6. Explicitly list what was not checked (especially real engines/devices).
 
-Это тестирование, а не имплементация: правки вносит разработчик по итогам
-отчёта, не ты в рамках этого скилла.
+This is testing, not implementation: fixes are made by the developer based on the
+report, not by you within this skill.
+

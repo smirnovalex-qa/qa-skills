@@ -1,0 +1,262 @@
+---
+description: Refactors existing tests without losing coverage — removes duplication, brittleness, test anti-patterns, speeds up the run, rebalances the test pyramid. Detects the project's test stack, measures the before metrics (test/line count, run time, coverage), eliminates anti-patterns (copy-paste, brittle asserts/locators, several unrelated checks in one test, order/shared-state dependence, slow tests, redundant E2E, over-mocking, magic numbers, unclear names), then runs the whole suite before and after and proves that WHAT is checked has not changed and coverage has not dropped. Use when asked "refactor the tests", "the tests are duplicated/brittle/slow", "clean up the tests", "remove the copy-paste in the tests", "make the tests maintainable", "why are the tests so slow", "too much E2E" — even without the word "refactoring". This is NOT the same as unit-coverage-gap (which ADDS missing tests for uncovered logic) and not flaky-test-triage (which fixes instability): here the goal is to improve the quality and maintainability of EXISTING tests while preserving coverage. This is an AUTHORING skill: it edits and runs test code.
+argument-hint: "[path to a test file/directory/suite, branch/diff, or issue; all optional — if empty, I'll ask which tests to refactor]"
+---
+# Test refactoring without losing coverage
+
+You are an engineer bringing a test suite into shape. Bad tests are technical
+debt: duplicates make changes expensive, brittle asserts break on harmless
+edits, slow E2E tests drag down CI, over-mocking checks the mocks instead of
+behavior. Your job is to improve the structure, readability, speed, and
+robustness of the tests, **without changing WHAT they check** and without
+losing coverage.
+
+The main invariant of refactoring: the observable behavior of the suite is
+unchanged. Before and after — the whole suite is run, coverage (lines AND
+branches) does not drop, and the tests still fail when the product code is
+genuinely broken. The discipline is evidence over assertion: improvements are
+confirmed by before/after metrics (test/line count, duplicates, run time,
+coverage) and by the run itself, not by a feeling that "it got cleaner".
+
+Work in the project's conventions: first detect the test stack, and refactor in
+its idioms (its way of parametrizing, of fixtures, of helpers). If the suite is
+large, split it into zones and delegate to subagents via the Agent tool.
+
+## INPUT / SCOPE (how to determine the perimeter)
+
+Perimeter: `$ARGUMENTS`
+
+The input may arrive in one of several forms:
+
+- **A. CODE: a test file / directory / suite / branch / diff** — the perimeter
+  = the given test files + their shared fixtures/helpers/factories/base classes
+  (refactoring them affects all consumers) + the product code that these tests
+  cover (needed so as not to lose coverage and to understand the contract). The
+  perimeter is ALWAYS wider than the literal input: editing a shared fixture
+  affects all tests that use it — include them.
+- **B. A DOCUMENT / test guideline** (.md/.txt) — if the project's test
+  standard is given, extract its rules (naming, structure, what to mock) and
+  bring the existing tests into line with them; a divergence of the tests from
+  the standard is the target of the refactoring.
+- **C. A TRACKER ISSUE** (ID/link) — fetch the text via an available
+  integration (MCP, if connected; otherwise ask the user). Find the mentioned
+  tests and related commits (`git log --all --grep=<ID>`).
+
+If it is unclear which tests to refactor, stop and clarify; do not rewrite the
+whole suite at random. Record the SCOPE at the start of the report.
+
+## KEY PRINCIPLE: REFACTORING DOES NOT CHANGE WHAT IS CHECKED
+
+1. **Behavior invariant.** Refactoring changes the form of a test, not its
+   subject. If after the "refactoring" the test checks something else (or stops
+   checking), that is not refactoring — it is a coverage regression.
+2. **Safety net — a run before.** Before touching the tests, run the whole
+   suite and record baseline metrics (how many tests, are they green, time,
+   coverage). Without a baseline you cannot prove behavior was preserved.
+3. **Coverage must not drop.** Measure coverage before and after. Especially
+   dangerous: when merging duplicates into a parametrization or extracting
+   asserts into a helper, accidentally dropping a case or weakening a check.
+4. **The test must still catch a break.** After refactoring, check with a
+   mutation mindset (or mutation testing, if available): break the product code
+   — the test must fail. "Green after refactoring" ≠ "still meaningful".
+5. **Small steps, with a run between.** Do not rewrite a file in one sweep.
+   Refactor one anti-pattern at a time, running the suite between steps — that
+   way a regression is localized immediately.
+6. **Do not drag in scope creep.** Do not add new functionality to the tests
+   along the way, and do not fix product bugs you find inside the refactoring —
+   break those out into a separate item/task (for adding missing tests there is
+   the unit-coverage-gap skill).
+
+## METHODOLOGY (the pipeline)
+
+1. **Detect the test stack** from the repository (pytest / jest / vitest / go
+   test / JUnit / RSpec / PHPUnit …) and its idioms: how the project
+   parametrizes, where it keeps fixtures/factories/helpers, what the naming is,
+   what the coverage tool is.
+2. **Measure the before metrics**: number of tests, lines of test code, run
+   time of the whole suite, coverage (lines and branches). Run the suite — it
+   must be green (if it is already red/flaky, that is a separate task;
+   refactoring on top of instability is not allowed — stabilize first or flag
+   it).
+3. **Take an inventory of anti-patterns** (see the catalog below): walk the
+   SCOPE tests, marking file:line and the problem class. Rate each by the
+   benefit/risk ratio.
+4. **Refactor one problem class at a time**, in small steps, running the suite
+   between changes. Preserve WHAT is checked.
+5. **Verify the invariant**: re-run the whole suite (green), re-measure coverage
+   (not below baseline), check with a mutation mindset that the key tests still
+   fail when the product is broken.
+6. **Measure the after metrics** and compare with the baseline.
+
+## CATALOG OF ANTI-PATTERNS AND HOW TO FIX THEM
+
+1. **Duplication (copy-paste)**
+   - Symptom: the same setup/sequence of actions/asserts repeats across many
+     tests; a contract change requires manual edits in a dozen places.
+   - Fix: extract the common setup into a **fixture/factory/builder**, the
+     repeated checks into an **assert helper**, a family of "input→expectation"
+     into a **parametrization** (`@pytest.mark.parametrize`, `test.each`,
+     table-driven). Do NOT overdo it: excessive abstraction (DRY at any cost)
+     makes a test unreadable — a test must stay understandable locally.
+2. **Brittle asserts / locators**
+   - Symptom: an assert on the whole object/whole string/exact JSON, breaks on
+     an irrelevant field; UI locators by index/full XPath/text; comparison
+     against an exact timestamp/UUID.
+   - Fix: assert the **relevant** fields/invariants, not everything at once; use
+     robust locators (role/`data-testid`, not a brittle path); for generated
+     values check the format/presence, not a literal match. Do not weaken it
+     into meaninglessness — the assert must remain a check.
+3. **Several unrelated checks in one test**
+   - Symptom: one test checks create, update, and delete all at once; the first
+     failed assert hides the rest; it is unclear what exactly broke.
+   - Fix: **split** into separate tests, one behavior each (one logical
+     assert-concept per test). Keeping related checks of a single result
+     together is acceptable.
+4. **Order dependence / shared state**
+   - Symptom: the test relies on state left behind by a neighbor; fails under
+     order randomization.
+   - Fix: **isolate** — fresh state per test (a fixture with cleanup, a
+     transaction with rollback, a reset of mocks/cache in teardown). Make the
+     tests independent (verify with randomization). (If this shows up as
+     instability — see the flaky-test-triage skill.)
+5. **Slow tests**
+   - Symptom: the test hits the real network/DB/FS, sleeps a fixed sleep,
+     spins up a heavy environment just to check pure logic.
+   - Fix: **mock the I/O** at the boundary; replace `sleep` with an explicit
+     wait; drop the check to the right level of the pyramid (see item 6); reuse
+     expensive fixtures with the right scope (session/module) where it is safe.
+     Measure the time before/after.
+6. **Redundant E2E where a unit would do (pyramid imbalance)**
+   - Symptom: a business rule/validation/branch is checked by a heavy E2E test
+     through the whole stack, though it is pure logic; dozens of slow E2E tests
+     duplicate what a fast unit test would cover.
+   - Fix: **rebalance the pyramid** — move the logic check to the
+     unit/integration level, keep E2E only for end-to-end user scenarios
+     (smoke/critical path). Do not delete E2E without making sure the logic is
+     covered below (otherwise coverage is lost).
+7. **Over-mocking (the test checks mocks, not behavior)**
+   - Symptom: so much is mocked that the test only checks that the mocks were
+     called with the arguments it set itself (a tautology); rewriting the
+     implementation breaks the test though behavior did not change.
+   - Fix: mock only the **external boundaries** (network/DB/time/FS), not the
+     internal logic of the module under test; check the observable
+     **result/effect**, not the fact that internal methods were called. Where
+     appropriate, replace a mock with a real lightweight object/fake.
+8. **Unclear names and structure**
+   - Symptom: `test_1`, `test_it_works`; it is unclear what the scenario is;
+     everything is dumped together with no separation of setup/action/check.
+   - Fix: **descriptive names** (what is expected under what conditions:
+     `returns_403_if_other_company`); an **Arrange-Act-Assert**
+     (Given-When-Then) structure with visual separation. The test name = its
+     specification.
+9. **Magic numbers / data**
+   - Symptom: `assert result == 42`, `user_id=7` without explanation, a "magic"
+     literal whose meaning only the author knows.
+   - Fix: named constants/fixtures with meaningful names; explain the origin of
+     the expected value (a comment/name) so that an edit does not become
+     guesswork.
+10. **No negative cases**
+    - Symptom: tests only for the "happy path"; errors/boundaries/invalid input
+      are not checked.
+    - Fix: within the refactoring you may **fill in** obviously missing negative
+      cases next to the existing ones (a boundary, an exception, invalid input),
+      but large coverage growth is already unit-coverage-gap; do not turn the
+      refactoring into writing a new suite.
+11. **Dead / commented-out / always-green tests**
+    - Symptom: `skip`/`xfail` without a reason, commented-out tests, a test
+      without asserts, a test that cannot fail.
+    - Fix: delete the dead ones (recording it in the report) or fix/uncomment
+      them with a meaningful assert; an always-green test either strengthen or
+      delete.
+
+## EDGE CASES THAT ARE OFTEN MISSED
+
+- **Parametrization swallowed a case**: while collapsing duplicates into a
+  table, one input or one assert was silently lost — coverage/behavior sagged
+  unnoticed. Check the number of logical checks before/after.
+- **An extracted assert helper got weaker**: the shared helper checks less than
+  the original copies checked separately.
+- **A fixture scope change broke isolation**: you moved a fixture from function
+  to module/session for speed — and got state leakage/flakiness.
+- **You deleted E2E but the logic did not go down** — coverage is formally the
+  same by lines, but no one checks the end-to-end scenario anymore.
+- **You removed a "duplicate" test that actually checked a different case** —
+  outwardly similar, semantically distinct.
+- **Refactoring under an unstable suite**: if the tests are already flaky,
+  "before" and "after" are not comparable — stabilize first.
+- **Replacing a mock with a real object dragged the network/DB into the test**
+  — it became "more honest" but slower/less stable; watch the boundary.
+- **Snapshot tests**: a mass update of snapshots "so it goes green" may cement
+  broken behavior as the reference — update consciously.
+- **You changed the naming/file structure — and broke the runner's test
+  discovery** (name pattern, discovery).
+- **A shared builder with defaults hid important differences in the inputs** —
+  tests came to look the same where the difference is essential.
+- **Loss of a comment that explained a non-obvious expected result** — while
+  rewriting, the knowledge of why exactly this value is expected disappeared.
+
+## DEFINITION OF DONE (DoD)
+
+- The before baseline metrics are taken (test/line count, run time, line and
+  branch coverage) on a green suite.
+- The eliminated anti-patterns are listed with file:line and the fix method.
+- WHAT is checked is preserved: coverage (lines AND branches) is not below
+  baseline; the number of logical checks did not decrease covertly (deliberate
+  deletions of dead tests — as a separate item).
+- The whole suite is run after refactoring and is green; the key tests still
+  fail when the product is genuinely broken (checked with a mutation mindset /
+  mutation testing).
+- The after metrics are taken and compared with before (fewer
+  duplicates/lines, faster run, coverage not dropped).
+- The refactoring is in the project's idioms; no scope creep was introduced
+  (new functionality/product bug fixes are broken out separately).
+
+## REPORT FORMAT
+
+1. **One-line summary**: the suite is refactored — N anti-patterns eliminated,
+   duplicates/lines/run time reduced, coverage preserved (X% lines / Y branches
+   → not below).
+2. **SCOPE** — which tests were refactored and how the perimeter was
+   determined; what was left out of the perimeter.
+3. **Test stack and coverage tool** — what was detected and by which commands
+   it was measured/run.
+4. **Before/after metrics** — a table: number of tests, lines of test code,
+   (approximate) number of duplicates, run time, line coverage, branch
+   coverage.
+5. **What was changed and why** — a list of edits: file:line, anti-pattern
+   class, what was done, how the behavior invariant was preserved.
+6. **Proof that behavior was preserved** — the "after" run is green (output),
+   coverage did not drop (numbers), the result of the mutation-mindset/mutation
+   testing check on the key tests.
+7. **Deliberate deletions** — which dead/duplicate/always-green tests were
+   deleted and why this is not a loss of coverage.
+8. **Broken out separately (scope creep, not done here)** — product bugs found,
+   large coverage gaps (→ unit-coverage-gap), instability (→ flaky-test-triage).
+9. **What could not be verified** — limitations (no environment for some
+   integration/E2E, mutation testing not set up, etc.).
+
+## EXECUTION (practical instructions)
+
+1. YOURSELF, in the main thread, perform the SCOPE block — determine the suite
+   to refactor from `$ARGUMENTS`/context. Do not delegate: a subagent does not
+   see the dialog context. Record the SCOPE.
+2. YOURSELF detect the test stack and take the before baseline metrics on a
+   green run — this is the invariant's baseline.
+3. Take an inventory of anti-patterns across the SCOPE. If the suite is large
+   and the Agent tool is available, split it into independent zones (by
+   file/directory) and launch a subagent per zone. Give each: the specific
+   paths, the detected test stack and the run/coverage commands, the relevant
+   sections of this skill (the anti-pattern catalog, edge cases, DoD — the
+   subagent does not see the file itself) and the requirement: refactor in
+   small steps, run the suite between steps, return the "before/after" metrics
+   and confirmation that coverage did not drop.
+4. Refactor one problem class at a time, running the suite between changes.
+5. When done, run the whole SCOPE suite in full, re-measure coverage, compare
+   with the baseline metrics.
+6. Consolidate into a report per the format above. Store the inventory and
+   metrics in a file, not only in context.
+
+This is an authoring skill: edit the tests so as to preserve the checked
+behavior and coverage, and make the tests readable, fast, and robust in the
+project's idioms. If the refactoring uncovered a real product bug — do not
+"paper over" it by tuning the test, break it out as a separate item.

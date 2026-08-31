@@ -35,17 +35,26 @@ Each skill is a self-contained, model-invoked QA workflow — you describe the t
 - **Adversarial verification** — reports and fixes are challenged before they are trusted, to filter out plausible-but-wrong conclusions.
 - **Explicit verdicts** — every audit ends with a clear production-readiness call, not a wall of caveats.
 
-### One source, three tools
+### One source, all tools and languages
 
-The skills are authored once, as [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) `SKILL.md` files under [`plugins/qa-skills/skills/`](plugins/qa-skills/skills). From that single canonical source, [`scripts/generate-adapters.mjs`](scripts/generate-adapters.mjs) produces drop-in adapters for the other tools under [`dist/`](dist) — so the trigger text and the workflow are identical everywhere, and you never maintain three copies by hand.
+Every skill is authored once in the canonical source tree
+[`skills-src/`](skills-src) — `<name>/{meta.yml, en/SKILL.md, ru/SKILL.md}`. From
+that single source, [`scripts/generate-adapters.mjs`](scripts/generate-adapters.mjs)
+builds **both language editions** for **every tool**: the two Claude Code plugins
+under [`plugins/`](plugins) and the Cursor/Codex adapters under [`dist/`](dist).
+Trigger text and workflow stay identical across languages and tools, and you never
+maintain copies by hand — you edit `skills-src/` and regenerate.
 
 | Tool | Format | How the workflow is reached |
 | --- | --- | --- |
-| **Claude Code** | Plugin skills — [`plugins/qa-skills/skills/*/SKILL.md`](plugins/qa-skills/skills) (the source) | Auto-invoked: the agent loads a skill on its own when your request matches its `description`. |
-| **Cursor** | Project rules — [`dist/cursor/rules/*.mdc`](dist/cursor/rules) | Auto-attached (*Agent Requested*): Cursor's agent pulls a rule in when the task matches its `description`. Also attachable by hand with `@rule-name`. |
-| **Codex** | Custom prompts — [`dist/codex/prompts/*.md`](dist/codex/prompts) | Invoked by name as `/skill-name`. Codex has no description-based auto-trigger, so an [`AGENTS.md` snippet](dist/codex/AGENTS.snippet.md) gives the agent a catalog of when to reach for each. |
+| **Claude Code** | Plugin skills — [`plugins/qa-skills`](plugins/qa-skills) (English) / [`plugins/qa-skills-ru`](plugins/qa-skills-ru) (Russian) | Auto-invoked: the agent loads a skill on its own when your request matches its `description`. Pick the language by which plugin you install. |
+| **Cursor** | Project rules — `dist/<locale>/cursor/rules/*.mdc` | Auto-attached (*Agent Requested*): Cursor's agent pulls a rule in when the task matches its `description`. Also attachable by hand with `@rule-name`. |
+| **Codex** | Custom prompts — `dist/<locale>/codex/prompts/*.md` | Invoked by name as `/skill-name`. Codex has no description-based auto-trigger, so an `AGENTS.snippet.md` per locale gives the agent a catalog of when to reach for each. |
 
-> **Language note:** skill instructions are authored in **Russian**. The skills themselves are stack- and workflow-oriented and can be adapted to any project.
+> **Localization:** skills ship in **English** (default) and **Russian**, generated
+> from the same source. English is the canonical edition; Russian is a full
+> translation. Replace `<locale>` with `en` or `ru` in the paths above. The skills
+> are stack- and workflow-oriented and adapt to any project.
 
 ## Skills
 
@@ -132,12 +141,19 @@ git clone https://github.com/smirnovalex-qa/qa-skills.git
 ### Claude Code
 
 Requires Claude Code with plugin support. Add this repository as a plugin
-marketplace, then install the plugin — no cloning or copying needed:
+marketplace, then install the plugin **in your language** — no cloning or copying
+needed:
 
 ```bash
 /plugin marketplace add https://github.com/smirnovalex-qa/qa-skills.git
-/plugin install qa-skills@qa-skills
+/plugin install qa-skills@qa-skills        # English (default)
+# — or —
+/plugin install qa-skills-ru@qa-skills     # Russian
 ```
+
+Both plugins expose the same 29 skills under the same names; they differ only in
+the language of the instructions and triggers. Install the one that matches how
+your team writes prompts (install just one to avoid duplicate skills).
 
 To pin a local checkout instead of the remote (e.g. for development):
 
@@ -157,18 +173,19 @@ scoped to the repository you drop them into. Each rule is *Agent Requested*
 when the task matches; you can also attach one by hand with `@rule-name` in chat.
 Because they are committed to the project, the whole team gets them via `git pull`.
 
-Copy the rules into the **target project** (not this repo):
+Copy the rules **for your language** into the **target project** (not this repo) —
+use `dist/en/...` for English or `dist/ru/...` for Russian:
 
 ```bash
 # macOS / Linux — from the cloned qa-skills directory
 mkdir -p /path/to/your-project/.cursor/rules
-cp dist/cursor/rules/*.mdc /path/to/your-project/.cursor/rules/
+cp dist/en/cursor/rules/*.mdc /path/to/your-project/.cursor/rules/
 ```
 
 ```powershell
 # Windows PowerShell — from the cloned qa-skills directory
 New-Item -ItemType Directory -Force C:\path\to\your-project\.cursor\rules | Out-Null
-Copy-Item dist\cursor\rules\*.mdc C:\path\to\your-project\.cursor\rules\
+Copy-Item dist\en\cursor\rules\*.mdc C:\path\to\your-project\.cursor\rules\
 ```
 
 Reload Cursor (or reopen the project) and the rules appear under
@@ -182,18 +199,20 @@ invoked by name as `/skill-name`. Prompts are user-scoped, so they apply across
 all your projects. Skill bodies already use `$ARGUMENTS`, which Codex substitutes
 with whatever you pass after the command.
 
-Copy the prompts into your Codex prompts directory:
+Copy the prompts **for your language** into your Codex prompts directory
+(`dist/en/...` or `dist/ru/...` — install one, since both share the same
+`/command` names):
 
 ```bash
 # macOS / Linux
 mkdir -p ~/.codex/prompts
-cp dist/codex/prompts/*.md ~/.codex/prompts/
+cp dist/en/codex/prompts/*.md ~/.codex/prompts/
 ```
 
 ```powershell
 # Windows PowerShell
 New-Item -ItemType Directory -Force $HOME\.codex\prompts | Out-Null
-Copy-Item dist\codex\prompts\*.md $HOME\.codex\prompts\
+Copy-Item dist\en\codex\prompts\*.md $HOME\.codex\prompts\
 ```
 
 Then invoke a workflow by name, passing the scope as the argument:
@@ -205,22 +224,25 @@ Then invoke a workflow by name, passing the scope as the argument:
 ```
 
 Codex won't pick a prompt automatically, so append the contents of
-[`dist/codex/AGENTS.snippet.md`](dist/codex/AGENTS.snippet.md) — a table of
-*"which `/command` to use when"* — to your project's `AGENTS.md` (or
-`~/.codex/AGENTS.md`). That lets the agent suggest the right workflow itself,
-recovering most of Claude Code's description-based routing.
+`dist/<locale>/codex/AGENTS.snippet.md` — a table of *"which `/command` to use
+when"* — to your project's `AGENTS.md` (or `~/.codex/AGENTS.md`). That lets the
+agent suggest the right workflow itself, recovering most of Claude Code's
+description-based routing.
 
-### Regenerating the adapters
+### Regenerating the outputs
 
-The files under [`dist/`](dist) are committed and usable as-is. After you edit a
-skill's `SKILL.md`, regenerate them from the canonical source:
+The plugin skill trees and the `dist/` adapters are committed and usable as-is.
+After editing a skill under [`skills-src/`](skills-src), rebuild every language
+edition and tool target from the canonical source:
 
 ```bash
 node scripts/generate-adapters.mjs .
 ```
 
-See [`dist/README.md`](dist/README.md) for argument-passing details and notes on
-what each adapter preserves or approximates.
+This regenerates both Claude Code plugins (`plugins/qa-skills`,
+`plugins/qa-skills-ru`) and both adapter locales (`dist/en`, `dist/ru`). See
+[`dist/README.md`](dist/README.md) for argument-passing details and notes on what
+each adapter preserves or approximates.
 
 ## Usage
 
@@ -253,52 +275,40 @@ want to force a specific workflow instead of relying on auto-selection.
 
 ```
 qa-skills/
-├── .claude-plugin/
-│   └── marketplace.json          # Marketplace manifest (lists the plugin)
-├── plugins/
-│   └── qa-skills/
-│       ├── .claude-plugin/
-│       │   └── plugin.json        # Plugin manifest (name, version, author)
-│       └── skills/                      # 29 skills, one directory each
-│           ├── requirements-review/SKILL.md
-│           ├── test-plan/SKILL.md
-│           ├── risk-analysis/SKILL.md
-│           ├── test-case-design/SKILL.md
-│           ├── test-checklist/SKILL.md
-│           ├── test-data-generation/SKILL.md
-│           ├── e2e-test-author/SKILL.md
-│           ├── api-test-author/SKILL.md
-│           ├── unit-coverage-gap/SKILL.md
-│           ├── flaky-test-triage/SKILL.md
-│           ├── test-refactor/SKILL.md
-│           ├── accessibility-audit/SKILL.md
-│           ├── i18n-l10n-review/SKILL.md
-│           ├── cross-browser-compat/SKILL.md
-│           ├── bug-report-write/SKILL.md
-│           ├── bug-report-verify/SKILL.md
-│           ├── bug-triage/SKILL.md
-│           ├── root-cause-analysis/SKILL.md
-│           ├── defect-metrics-report/SKILL.md
-│           ├── bugfix-audit/SKILL.md
-│           ├── feature-review/SKILL.md
-│           ├── security-audit-feature/SKILL.md
-│           ├── security-audit-full/SKILL.md
-│           ├── performance-audit-feature/SKILL.md
-│           ├── performance-audit-full/SKILL.md
-│           ├── release-readiness/SKILL.md
-│           ├── smoke-suite/SKILL.md
-│           ├── test-summary-report/SKILL.md
-│           └── ci-qa-gate/SKILL.md
-├── dist/                                  # Generated adapters for other tools
-│   ├── cursor/rules/*.mdc                 #   Cursor project rules (Agent Requested)
-│   └── codex/                             #   Codex custom prompts + AGENTS.md snippet
-│       ├── prompts/*.md
-│       └── AGENTS.snippet.md
+├── skills-src/                            # ★ Canonical source — edit here
+│   └── <skill>/                            #   29 skills, one directory each
+│       ├── meta.yml                        #     name + disallowed-tools (locale-invariant)
+│       ├── en/SKILL.md                      #     English description + argument-hint + body
+│       └── ru/SKILL.md                      #     Russian description + argument-hint + body
+│
 ├── scripts/
-│   └── generate-adapters.mjs             # Regenerates dist/ from the SKILL.md sources
+│   └── generate-adapters.mjs              # Builds every output below from skills-src/
+│
+│   # ── Everything below is GENERATED (committed, never hand-edited) ──
+├── .claude-plugin/
+│   └── marketplace.json                   # Marketplace manifest (lists both plugins)
+├── plugins/
+│   ├── qa-skills/                          # English plugin (default)
+│   │   ├── .claude-plugin/plugin.json
+│   │   └── skills/<skill>/SKILL.md
+│   └── qa-skills-ru/                        # Russian plugin
+│       ├── .claude-plugin/plugin.json
+│       └── skills/<skill>/SKILL.md
+├── dist/
+│   ├── en/                                 # English adapters
+│   │   ├── cursor/rules/*.mdc               #   Cursor project rules (Agent Requested)
+│   │   └── codex/                           #   Codex custom prompts + AGENTS.md snippet
+│   │       ├── prompts/*.md
+│   │       └── AGENTS.snippet.md
+│   └── ru/                                 # Russian adapters (same structure)
+│
 ├── LICENSE
 └── README.md
 ```
+
+> The plugin skill trees and everything under `dist/` are build outputs of
+> `scripts/generate-adapters.mjs`. Edit skills only in `skills-src/`, then
+> regenerate — see [Contributing](#contributing).
 
 ## Compatibility & Assumptions
 
@@ -323,26 +333,29 @@ These are conventions, not hard requirements — the workflows transfer to other
 with light adaptation. Internal project- and host-specific identifiers have been
 replaced with neutral placeholders (`the-platform`, `the-frontend`,
 `youtrack.example.com`, `libs/shared_*`); adjust them to your project inside the
-relevant `SKILL.md` files.
+relevant `skills-src/<skill>/{en,ru}/SKILL.md` sources, then regenerate.
 
 ## Versioning
 
-The plugin follows [Semantic Versioning](https://semver.org/). The current version is
-declared in [`plugins/qa-skills/.claude-plugin/plugin.json`](plugins/qa-skills/.claude-plugin/plugin.json).
-Consumers receive updates by re-running `git pull` on the marketplace, or via the
-Claude Code plugin update flow.
+The plugins follow [Semantic Versioning](https://semver.org/). Versions are declared
+in [`plugins/qa-skills/.claude-plugin/plugin.json`](plugins/qa-skills/.claude-plugin/plugin.json)
+(English) and [`plugins/qa-skills-ru/.claude-plugin/plugin.json`](plugins/qa-skills-ru/.claude-plugin/plugin.json)
+(Russian), and are kept in lockstep. Consumers receive updates by re-running
+`git pull` on the marketplace, or via the Claude Code plugin update flow.
 
 ## Contributing
 
-1. One skill per directory, each with a single `SKILL.md`.
-2. Keep the `description` in each skill's front matter precise — it is what Claude uses
-   to decide when to trigger the skill.
+1. Edit skills only under [`skills-src/`](skills-src) — one directory per skill,
+   with `meta.yml` plus `en/SKILL.md` and `ru/SKILL.md`. Keep the two languages in
+   sync (translate the change in both). Never hand-edit `plugins/*/skills/` or
+   `dist/` — they are generated.
+2. Keep each `description` precise and mirror it across `en` and `ru` — it is what
+   the agent uses to decide when to trigger the skill.
 3. Do not commit project-, host-, or company-specific identifiers, secrets, or PII.
    Use neutral placeholders (see [Compatibility & Assumptions](#compatibility--assumptions)).
-4. Edit only the canonical `SKILL.md` sources, then regenerate the Cursor/Codex
-   adapters with `node scripts/generate-adapters.mjs .` and commit the updated
-   `dist/` — never hand-edit files under `dist/`.
-5. Bump the plugin `version` on any change to skill behavior.
+4. Regenerate all outputs with `node scripts/generate-adapters.mjs .` and commit
+   the updated `plugins/` and `dist/` together with your source change.
+5. Bump the `version` in both plugin manifests on any change to skill behavior.
 
 ## Security & Privacy
 

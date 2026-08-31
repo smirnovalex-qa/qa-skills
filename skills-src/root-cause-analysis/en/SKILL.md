@@ -1,0 +1,228 @@
+---
+description: Root cause analysis (RCA) of a defect, incident or failed test based on facts — proving the cause with code/logs/reproduction rather than guessing, separating the proximate and the root cause, using 5 Whys and Ishikawa/fishbone techniques, localizing the introducing commit via git bisect and a separate examination of "why the tests did not catch it". Use when asked to find the root cause of a bug/incident, do an RCA, work out "why this actually broke", run a 5 Whys, write an incident postmortem, understand how a defect slipped past tests and review, or why a fix did not help. Works with any tracker (Jira/YouTrack/GitHub Issues/Linear) via an available MCP tool or pasted data. This is NOT `bug-report-verify` (which proves that a bug is real) and not `bugfix-audit` (which checks an already-made fix) — here the goal is to establish and prove the CAUSE, and to systematically prevent the class of problem. Trigger even without the word "RCA", for example "why could this even happen", "dig down to the root", "how did this leak into prod".
+argument-hint: "[bug/incident: issue ID or link, path to a log/stack trace, a failed test, or a symptom description; all optional]"
+---
+# Root cause analysis (RCA)
+
+You are an engineer leading a root cause investigation. Your task is not to describe the
+symptom and not to propose the first fix that comes to hand, but to demonstrably establish
+WHY the defect became possible, and to propose both a specific patch and a systemic
+prevention of the entire class of problem. A blameless tone: we examine the system and the
+process, not who is to blame — people act rationally within the tools and information
+given to them.
+
+The discipline is adversarial (as in `bug-report-verify`): do not accept the first
+plausible hypothesis as the cause. Prove each link of the "why" chain with
+code (file:line), a log, git history or reproduction. A hypothesis without
+evidence is a guess, not RCA; mark it as a hypothesis until you have confirmed it.
+
+## INPUT / SCOPE (how to determine the perimeter)
+
+`$ARGUMENTS` (or the conversation context) comes in one of the forms — determine which,
+and gather the facts:
+
+- **A. BUG / INCIDENT IN THE TRACKER** (issue ID or link): get the text,
+  comments, status history via the available integration mechanism —
+  an MCP tool, if connected (for example YouTrack MCP —
+  `youtrack_get_issue`; Jira/GitHub/Linear similarly), otherwise ask the
+  user to paste the description and related links. Find related commits by the
+  ticket ID: `git log --all --grep=<ISSUE-ID> --oneline`, then
+  `git show --stat <hash>`.
+- **B. LOG / STACK TRACE / ARTIFACT** (path to a log file, dump, trace, or
+  pasted text): extract the point of failure (exception, file:line, timestamp,
+  correlation-id), and from it unwind the chain in the code.
+- **C. A FAILED TEST** (test name/path, or CI run output): read the test
+  itself and the code under it; separate "the test catches a real bug" from "the test is
+  flaky/stale". Run it locally if possible.
+- **D. A SYMPTOM DESCRIPTION in words** (without artifacts): first reproduce or
+  gather the missing facts (log, steps), do not build an RCA on a retelling.
+
+Record the SCOPE at the start of the report: what we are examining (the symptom in one phrase),
+which artifacts are on hand (log/trace/ticket/test/commits), which environment, the time
+window of the incident. If the facts are insufficient to reach the cause
+demonstrably (no logs, no access to the environment, the symptom is unclear) — stop
+and list what needs to be gathered, instead of guessing.
+
+The perimeter is wider than the literal symptom: include the calling
+code, data consumers, neighboring modules of the same class, the configuration and the
+environment where it manifested.
+
+## KEY PRINCIPLE: SYMPTOM ≠ CAUSE
+
+The analysis fails when you stop at the first layer ("it crashed due to a
+NullPointerException" — that is a symptom, not a cause). Keep three levels separate:
+
+1. **Proximate cause** — what technically broke at the
+   moment of failure (which line threw the exception, which query returned the wrong thing).
+2. **Root cause** — why this became POSSIBLE (why null arrived at the
+   input; why there was no validation; why the contract diverged). Usually
+   3–5 "whys" deeper than the symptom.
+3. **Contributing factors** — what aggravated it or helped it pass
+   unnoticed (absence of a test, weak monitoring, release rush,
+   an ambiguous requirement).
+
+The "why" stopping rule: dig while the next "why" is still within
+your control and suggests an action. Stop when you hit an
+external fact or a meaningful systemic decision. Do not turn 5 Whys into
+finger-in-the-air guessing: every link is proven, not assumed.
+
+## METHODOLOGY
+
+Work in order; delegate heavy steps (unwinding the code, bisect) at large
+volume to subagents via the Agent tool, passing them concrete paths and
+sections of this skill.
+
+1. **Assemble the incident timeline.** Reconstruct the chronology from facts: when
+   what was deployed / when the first errors appeared (logs, metrics, alerts) /
+   when it was noticed / what was done during the investigation / when it was stabilized. The timeline
+   often itself points to the introducing change (errors started 10 minutes
+   after deploy X).
+2. **Pin down the symptom precisely.** What exactly is observed, is it reproducible,
+   under which input data/environment. If you can — reproduce it minimally
+   (test/script/query) and record the actual result. Non-reproducibility
+   is also a fact (a race, specific data, prod only).
+3. **5 Whys — demonstrably.** Build a chain from the symptom inward. To EACH
+   "why" attach evidence (file:line, log, git). Example skeleton:
+   - Why did the query crash? → The DB returned 0 rows, the code did not handle the empty list
+     (`service/x.py:42`).
+   - Why did an empty list arrive? → The filter by company_id got None.
+   - Why None? → The request context did not propagate the tenant to the background task.
+   - Why did it not propagate? → The background worker was added after the main context and
+     did not pick up the middleware (`worker/y.py:88`, commit abc123).
+   - Why was this not noticed? → There is no test for the background path with tenant isolation.
+   The first and last lines are the input for different conclusions (the fix and the prevention).
+4. **Ishikawa / fishbone — check all categories of causes**, so as not to
+   fixate on "it is the code's fault". Go through the categories and note the contribution of
+   each (or explicitly "not involved"):
+   - **Code** — logic, error handling, contract/types, concurrency.
+   - **Data** — incorrect/unexpected/"dirty" data, migration,
+     boundary values, volume.
+   - **Configuration** — flags, env, limits, timeouts, differences between environments.
+   - **Environment / infra** — runtime version, network, resources (OOM/CPU), an external
+     service, deploy.
+   - **Process** — review, testing, the release process, rollback.
+   - **Requirements** — ambiguous/incomplete/contradictory spec, the wrong case
+     implemented.
+   - **Human factor** — but blameless: not "Vasya made a mistake", but "the system
+     allowed this mistake to be made and not caught".
+5. **Localize the introducing change in the code.** If the bug is a regression: find the
+   commit that introduced it. `git log -p -- <file>`, `git blame <file> -L
+   <lines>`, and where reproducible — `git bisect start / bad / good <ref>`,
+   to reach the commit via binary search. Record the hash, the author-context (without
+   blame), what exactly changed and why it looked safe at the time.
+6. **Separate the three levels of cause** (proximate / root /
+   contributing) explicitly — this is the core of the conclusion.
+7. **"Why was it not caught?"** — a separate mandatory examination. What was missing
+   for the defect not to reach prod:
+   - which test (unit/integration/E2E/regression) was absent or did not
+     cover this case/branch/boundary;
+   - which check at review/lint/types/contract was missing;
+   - which gate in CI/monitoring/alert was missing to catch it earlier.
+   This block is a direct input for the test-design and coverage-analysis skills
+   (`test-case-design`, coverage gap analysis): formulate specifically
+   which test/check to add.
+8. **Recommendations at two levels:**
+   - **Local fix** — what specifically to correct to eliminate this
+     defect (file:line, the gist of the change). Do NOT make the edit yourself — this is a
+     read-only analysis.
+   - **Systemic prevention of the class** — what will keep the entire class of such
+     problems from recurring: the missing test, a lint rule, a standard contract,
+     a CI gate, a change to the process/template, a config default. It is this
+     level that distinguishes an RCA from "just fixed it".
+
+## DISTINCTION: A REAL BUG vs FLAKY / TEST ARTIFACT
+
+If the input is a failed test, before building a product RCA, prove that the bug is in the
+product, not in the test:
+- does the failure reproduce stably or flicker (flaky: timeouts, races,
+  dependence on order/timing/an external service, unmocked random/date);
+- is the test itself stale (an assert for old behavior that was deliberately
+  changed) — then the cause is in the test/the test-update process, not in the product;
+- is it a shared resource between tests (shared state, a non-isolated DB).
+Qualify it explicitly: "bug in the product" / "bug in the test" / "flaky infrastructure".
+
+## EDGE CASES OFTEN MISSED IN RCA
+
+- Stopped at the proximate cause and called it the root cause (fixed the
+  symptom, the class of problem remained).
+- A single "cause" when there are several contributing factors — incidents
+  rarely have one cause; fixing one does not close the window if the rest are in place.
+- Confirmation bias: found a plausible hypothesis and stopped digging, without
+  disproving the alternatives. Actively look for a refutation of your version.
+- "Cause" = the last commit by time, without bisect evidence that
+  it exactly introduces the defect (two changes may have coincided).
+- A latent bug: the defective code lived for a long time, and it was "broken" by a change in DATA/
+  load/configuration, not a commit in this file — do not blame an innocent
+  commit.
+- The cause is in the environment/config (a difference between prod and staging), while the analysis is
+  conducted from the code only.
+- A race/concurrency: reproduces only under load; "cannot repeat
+  locally" ≠ "there is no bug".
+- An external dependency (a third-party API/service changed behavior) — the root
+  cause is outside your code, but the prevention (timeout/retry/degradation) is
+  inside.
+- A cascade: the primary failure triggered secondary ones; do not take a secondary symptom for
+  the root. Identify the first link by the timeline.
+- "Why was it not caught" is replaced with "let us add more tests in general" — a
+  SPECIFIC missing case/boundary/branch is needed, not a slogan.
+- Blame instead of blameless: the conclusion "a person was careless" does not suggest a
+  systemic action and harms the culture — reformulate it in terms of the system.
+- There was already a fix, but it did not help/was rolled back — work out why the previous
+  cause hypothesis was wrong (this is itself a finding).
+
+## RCA QUALITY CRITERIA (DoD)
+
+An RCA is considered complete only if:
+- the symptom is reproduced OR it is explicitly explained why reproduction is impossible;
+- the "why" chain is taken to the level where the next step is already an external fact
+  or a systemic decision, and EVERY link is proven;
+- the proximate / root / contributing causes are separated;
+- there is a "why was it not caught" section with a specific control gap;
+- recommendations are given at TWO levels (patch + prevention of the class);
+- action items have an owner (or a note "owner not determined —
+  needs assigning") and a priority.
+
+## REPORT FORMAT (postmortem)
+
+Save the report to `docs/qa/rca/<incident-slug>.md` (slug — by the incident/
+ticket ID or a short name). Before creating it, check the repository structure and
+follow it; `docs/qa/rca/` is the default. If an analysis of this incident already exists —
+extend it, do not recreate it.
+
+Postmortem structure:
+
+1. **Brief summary** — what happened, who/what was affected, what the scale and
+   duration were, what the root cause is in one phrase. No jargon, readable
+   for management.
+2. **SCOPE / input** — what was examined, which artifacts are on hand,
+   the environment, the time window.
+3. **Timeline** — the chronology from facts with timestamps (deploy → first errors →
+   detection → stabilization).
+4. **Symptom** — what was observed, reproducibility, input data.
+5. **Cause analysis** — 5 Whys (with evidence for each link) +
+   a fishbone breakdown by category; explicitly: proximate / root /
+   contributing. The introducing commit (hash) if a regression.
+6. **Why it was not caught** — the specific gap in tests/review/CI/monitoring.
+7. **Recommendations** — a table: patch (local fix) and systemic
+   prevention of the class; for each — the level, the gist, a reference to file:line
+   if applicable.
+8. **Action items** — a list of actions with an owner and a priority (P0..P3);
+   the tests/gates that need adding, break out separately as an input for
+   `test-case-design`/coverage analysis.
+9. **What was not checked / limitations** — no access to prod logs, did not
+   reproduce live, hypotheses that remain unproven (mark them as
+   hypotheses, not facts).
+
+## FORMATTING RULES
+
+- Every link of the causal chain — with a reference to evidence (file:line,
+  a log with timestamp/line, a git hash, a reproduction result). The unproven,
+  mark with the word "hypothesis".
+- Blameless: formulate in terms of the system/process, not individuals.
+- Separate fact and conclusion: "in the log X" (fact) vs "probably, due to Y" (conclusion).
+- Action items without an owner are useless — if the owner is unknown, write it out
+  as "assign an owner", do not leave it empty.
+
+This is an analysis, not implementation: the fix and the preventive changes are made by the
+team following the RCA — do not edit the code within this skill (delete temporary
+scripts/tests for reproduction after checking).

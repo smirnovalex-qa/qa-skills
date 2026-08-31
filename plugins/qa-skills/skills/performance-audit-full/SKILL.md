@@ -1,387 +1,369 @@
 ---
 name: performance-audit-full
-description: Полный аудит производительности и ресурсоёмкости всего репозитория the-platform (backend-сервисы FastAPI/asyncpg/PostgreSQL/Redis/RabbitMQ, the-frontend, общие библиотеки libs/*, Docker/Kubernetes/Helm инфраструктура, нагрузочное тестирование k6 в load-testing/) — три независимых среза (инструментальное профилирование, построчный код-ревью, архитектурный обзор), находки только с измерением (EXPLAIN ANALYZE, py-spy, размер бандла, k6-прогоны), severity, file:line и итоговым вердиктом. Используй когда просят провести аудит производительности/ресурсоёмкости всей кодовой базы или инфраструктуры целиком, проверить расход CPU/RAM/сетевого трафика/стоимости инфраструктуры, найти узкие места по всему репозиторию, оценить экономичность архитектуры при росте нагрузки, или повторно перепроверить статус находок из предыдущего аудита/load-testing отчётов — даже если пользователь не произносит слово "аудит" буквально, а говорит "почему сервис жрёт столько CPU/памяти", "давай посмотрим на производительность всего проекта" и т.п.
-argument-hint: "[путь к предыдущему отчёту аудита, если это повторный аудит — опционально]"
+description: Full performance and resource-cost audit of the entire the-platform repository (FastAPI/asyncpg/PostgreSQL/Redis/RabbitMQ backend services, the-frontend, shared libraries libs/*, Docker/Kubernetes/Helm infrastructure, k6 load testing in load-testing/) — three independent passes (instrumental profiling, line-by-line code review, architectural review), findings only with measurement (EXPLAIN ANALYZE, py-spy, bundle size, k6 runs), severity, file:line, and a final verdict. Use when asked to run a performance/resource-cost audit of the whole codebase or infrastructure, to check CPU/RAM/network-traffic/infrastructure-cost consumption, to find bottlenecks across the whole repository, to assess the economy of the architecture as load grows, or to re-verify the status of findings from a previous audit/load-testing reports — even if the user doesn't say the word "audit" literally, but says "why does the service eat so much CPU/memory", "let's look at the performance of the whole project", etc.
+argument-hint: "[path to the previous audit report, if this is a re-audit — optional]"
 disallowed-tools: Edit, Write
 ---
 
-# Полный аудит производительности и ресурсоёмкости репозитория
+# Full repository performance and resource-cost audit
 
-Для проекта the-platform: микросервисная CRM-платформа — FastAPI + asyncpg +
-PostgreSQL + Redis + RabbitMQ бэкенд-сервисы, React/Vite/TS фронтенд
-(the-frontend), Docker/Kubernetes/Helm инфраструктура, нагрузочное
-тестирование на k6 в `load-testing/`.
+For the-platform project: a microservices CRM platform — FastAPI + asyncpg +
+PostgreSQL + Redis + RabbitMQ backend services, a React/Vite/TS frontend
+(the-frontend), Docker/Kubernetes/Helm infrastructure, load testing with k6
+in `load-testing/`.
 
-## РОЛЬ
+## ROLE
 
-Компания, для которой делается продукт, крайне чувствительна к расходу
-вычислительных ресурсов (CPU, RAM, сетевой трафик, стоимость инфраструктуры)
-— производительность и экономичность рассматриваются как приоритет первого
-класса, а не как техдолг "когда-нибудь потом". Аудит должен находить
-реальные, измеримые проблемы с привязкой к file:line и количественной
-оценкой воздействия (латентность, CPU, RAM, число запросов к БД, размер
-трафика), а не составлять общий чек-лист "best practices" без проверки на
-конкретной кодовой базе.
+The company the product is built for is extremely sensitive to the
+consumption of compute resources (CPU, RAM, network traffic, infrastructure
+cost) — performance and economy are treated as a first-class priority, not as
+tech debt to handle "someday later". The audit must find real, measurable
+problems tied to file:line and with a quantitative impact estimate (latency,
+CPU, RAM, number of DB queries, traffic size), not produce a generic "best
+practices" checklist without verification against the concrete codebase.
 
-## ВХОДНЫЕ ДАННЫЕ
+## INPUT
 
-`$ARGUMENTS` — необязательно путь к отчёту предыдущего аудита или к
-load-testing/reports для сравнения "было → стало". Если не передан — ищи
-сам: `load-testing/ANALYSIS_GUIDE.md`, `load-testing/reports`, и любые
-предыдущие отчёты аудита производительности, упомянутые в диалоге или
-репозитории.
+`$ARGUMENTS` — optionally a path to the previous audit report or to
+load-testing/reports for a "before → after" comparison. If not passed, look
+for it yourself: `load-testing/ANALYSIS_GUIDE.md`, `load-testing/reports`, and
+any previous performance-audit reports mentioned in the dialogue or the
+repository.
 
-Это аудит ВСЕГО репозитория. Если задача на самом деле касается только
-одной фичи/ветки/PR — это не тот скилл, используй `performance-audit-feature`
-вместо полного разбора всей кодовой базы (иначе периметр окажется избыточным
-и находки не будут привязаны к тому, что реально важно проверить).
+This is an audit of the WHOLE repository. If the task actually concerns only
+one feature/branch/PR — this is not the right skill; use
+`performance-audit-feature` instead of a full review of the entire codebase
+(otherwise the scope will be excessive and the findings will not be tied to
+what really matters to check).
 
-## КЛЮЧЕВОЙ ПРИНЦИП: ИЗМЕРЯЙ, А НЕ ДОГАДЫВАЙСЯ
+## KEY PRINCIPLE: MEASURE, DON'T GUESS
 
-Главная причина, по которой аудиты производительности проваливаются или,
-наоборот, наносят вред — это два симметричных провала: (а) находки без
-доказательства реального воздействия ("это может быть медленно") и (б)
-слепое накручивание "оптимизаций" (кэширование, мемоизация,
-denormalization) там, где нет измеренной проблемы, что усложняет код и
-создаёт новый класс багов (протухший кэш, race condition) ради
-несуществующего выигрыша. Обоих провалов быть не должно:
+The main reason performance audits fail or, conversely, do harm is two
+symmetric failures: (a) findings without proof of real impact ("this may be
+slow") and (b) blindly piling on "optimizations" (caching, memoization,
+denormalization) where there is no measured problem, which complicates the
+code and creates a new class of bugs (stale cache, race condition) for a
+nonexistent gain. Neither failure should occur:
 
-1. Для каждой находки, где это технически возможно, подтверждай воздействие
-   измерением: EXPLAIN ANALYZE для SQL-запроса, профилирование
-   (py-spy/cProfile) для CPU-хотспота, реальный размер бандла для
-   фронтенда, вывод существующих k6-сценариев из `load-testing/` для
-   нагрузочных характеристик API. Находка без числа — гипотеза, а не
-   находка; помечай её явно как "не подтверждено измерением" и указывай,
-   что нужно для подтверждения.
-2. Не предлагай оптимизацию там, где нет доказанной проблемы. Если код
-   "неидиоматичен", но не находится на горячем пути и не потребляет
-   заметных ресурсов — фиксируй как cosmetic/low, не как performance-
-   находку. Три одинаковых строки лучше преждевременной абстракции; тот же
-   принцип применим к кэшам и мемоизации.
-3. Различай "теоретически неоптимально" и "реально дорого при
-   текущем/ожидаемом объёме данных". N+1 запрос на таблице с 10 строками в
-   dev-окружении — не то же самое, что N+1 на таблице контактов/сделок с
-   сотнями тысяч строк в проде. Явно указывай, при каком объёме данных
-   находка становится критичной.
-4. Если оптимизация уже была сделана раньше (проверь git log/комментарии) —
-   проверь, не регрессировала ли она позже (например, кэш добавили, но
-   инвалидацию забыли при рефакторинге соседнего модуля).
-5. Формулируй статус явно: "подтверждено измерением" / "правдоподобно, но
-   не измерено" / "не является проблемой при текущем объёме данных" / "уже
-   оптимизировано корректно".
+1. For each finding where technically possible, confirm the impact by
+   measurement: EXPLAIN ANALYZE for a SQL query, profiling (py-spy/cProfile)
+   for a CPU hotspot, the real bundle size for the frontend, the output of
+   existing k6 scenarios from `load-testing/` for the load characteristics of
+   the API. A finding without a number is a hypothesis, not a finding; flag it
+   explicitly as "not confirmed by measurement" and state what is needed to
+   confirm it.
+2. Do not propose optimization where there is no proven problem. If code is
+   "non-idiomatic" but is not on a hot path and does not consume noticeable
+   resources — record it as cosmetic/low, not as a performance finding. Three
+   identical lines are better than premature abstraction; the same principle
+   applies to caches and memoization.
+3. Distinguish "theoretically suboptimal" from "really expensive at the
+   current/expected data volume". An N+1 query on a table with 10 rows in the
+   dev environment is not the same as an N+1 on a contacts/deals table with
+   hundreds of thousands of rows in prod. Explicitly state at what data volume
+   the finding becomes critical.
+4. If an optimization was already made earlier (check git log/comments) —
+   check whether it later regressed (e.g. a cache was added but invalidation
+   was forgotten when a neighboring module was refactored).
+5. State the status explicitly: "confirmed by measurement" / "plausible but
+   not measured" / "not a problem at the current data volume" / "already
+   optimized correctly".
 
-## МЕТОДОЛОГИЯ: ТРИ НЕЗАВИСИМЫХ СРЕЗА
+## METHODOLOGY: THREE INDEPENDENT PASSES
 
-Проведи аудит тремя независимыми методами и не позволяй одному срезу
-подменять другой — у них разная слепая зона.
+Run the audit by three independent methods and do not let one pass substitute
+for another — they have different blind spots.
 
-### СРЕЗ 1 — Инструментальный анализ и профилирование
+### PASS 1 — Instrumental analysis and profiling
 
-- **Backend (Python/FastAPI)**: включи логирование SQL (echo=True/aiosqlalchemy
-  debug) на ключевых сценариях и найди N+1 запросы и запросы без
-  LIMIT/пагинации; там, где доступно подключение к БД — прогони EXPLAIN
-  ANALYZE на самых частых/тяжёлых запросах и зафиксируй отсутствие индексов
-  (seq scan там, где ожидается index scan); используй py-spy/cProfile для
-  профилирования CPU на подозрительных горячих путях (webhook-обработчики,
-  sync-джобы, сериализация больших ответов).
-- **База данных**: pg_stat_statements (если включён) для топ запросов по
-  суммарному времени и по числу вызовов; список таблиц без индексов на
-  колонках, используемых в WHERE/JOIN/ORDER BY (сверь со схемой миграций
-  каждого сервиса); размер таблиц и рост со временем, если есть доступ к
-  метрикам.
-- **Redis**: паттерны ключей без TTL (риск неограниченного роста памяти),
-  команды KEYS/SCAN по всему пространству ключей в хот-пасе, размер
-  значений (сериализация целых объектов вместо нужных полей).
-- **RabbitMQ**: конфигурация prefetch/QoS, глубина очередей, retry-политики
-  без backoff/DLQ.
-- **Docker-образы**: dive или `docker history` по каждому собираемому
-  образу — размер слоёв, неиспользуемые build-инструменты и
-  dev-зависимости, попавшие в финальный образ; сравни с multi-stage build
-  там, где он есть/отсутствует.
-- **Frontend (the-frontend)**: построй production-сборку и проанализируй
-  бандл (`vite build --mode production` + rollup-plugin-visualizer/
-  source-map-explorer, если подключены, либо разбор dist/ по размеру
-  чанков вручную); Lighthouse (или аналог) по ключевым страницам для
-  метрик LCP/TBT/bundle size, если есть возможность поднять фронтенд
-  локально.
-- **Нагрузочное тестирование**: в репозитории уже есть k6-сценарии и
-  отчёты в `load-testing/` (см. `load-testing/ANALYSIS_GUIDE.md`,
-  `load-testing/k6`, `load-testing/reports`). Прочитай существующие
-  отчёты — какие узкие места уже были найдены ранее и не устранены; если
-  возможно поднять окружение — прогони актуальные сценарии заново и
-  сравни с сохранёнными baseline-отчётами.
-- **Kubernetes/Helm**: checkov/kube-linter или ручной разбор чартов на
-  предмет resources requests/limits (пустые/отсутствующие — риск noisy
-  neighbor и throttling; завышенные — прямой перерасход бюджета на
-  инфраструктуру), интервалы liveness/readiness проб (слишком частые
-  пробы = постоянная фоновая нагрузка на N реплик), конфигурация HPA и её
-  пороги.
+- **Backend (Python/FastAPI)**: enable SQL logging
+  (echo=True/aiosqlalchemy debug) on the key scenarios and find N+1 queries
+  and queries without LIMIT/pagination; where a DB connection is available —
+  run EXPLAIN ANALYZE on the most frequent/heavy queries and record missing
+  indexes (a seq scan where an index scan is expected); use py-spy/cProfile to
+  profile CPU on suspect hot paths (webhook handlers, sync jobs,
+  serialization of large responses).
+- **Database**: pg_stat_statements (if enabled) for the top queries by total
+  time and by number of calls; a list of tables without indexes on the columns
+  used in WHERE/JOIN/ORDER BY (cross-check with each service's migration
+  schema); table size and growth over time, if metrics are accessible.
+- **Redis**: patterns of keys without TTL (risk of unbounded memory growth),
+  KEYS/SCAN commands over the whole key space in the hot path, value size
+  (serializing whole objects instead of the needed fields).
+- **RabbitMQ**: prefetch/QoS configuration, queue depth, retry policies
+  without backoff/DLQ.
+- **Docker images**: dive or `docker history` on each built image — layer
+  sizes, unused build tools and dev dependencies that ended up in the final
+  image; compare against multi-stage build where it exists/is absent.
+- **Frontend (the-frontend)**: build the production bundle and analyze it
+  (`vite build --mode production` + rollup-plugin-visualizer/
+  source-map-explorer, if wired in, or manual analysis of dist/ by chunk
+  size); Lighthouse (or an analogue) on the key pages for LCP/TBT/bundle size
+  metrics, if it is possible to bring up the frontend locally.
+- **Load testing**: the repository already has k6 scenarios and reports in
+  `load-testing/` (see `load-testing/ANALYSIS_GUIDE.md`, `load-testing/k6`,
+  `load-testing/reports`). Read the existing reports — which bottlenecks were
+  found earlier and not resolved; if the environment can be brought up — re-run
+  the current scenarios and compare against the saved baseline reports.
+- **Kubernetes/Helm**: checkov/kube-linter or a manual review of the charts
+  for resources requests/limits (empty/missing — a risk of noisy neighbor and
+  throttling; oversized — direct overspend of the infrastructure budget),
+  liveness/readiness probe intervals (too-frequent probes = constant
+  background load on N replicas), HPA configuration and its thresholds.
 
-### СРЕЗ 2 — Ручной построчный разбор кода
+### PASS 2 — Manual line-by-line code review
 
-Раздели кодовую базу на независимые зоны и разбери КАЖДУЮ (не по диагонали,
-не полагаясь только на grep-паттерны):
+Split the codebase into independent zones and review EACH (not diagonally,
+not relying only on grep patterns):
 
-- Каждый backend-сервис отдельно (gateway, все `*-service` директории в
+- Each backend service separately (gateway, all `*-service` directories in
   `services/`).
 - Frontend / SPA (`the-frontend`).
-- Фоновые обработчики, боты и интеграции с внешними API
+- Background handlers, bots, and external-API integrations
   (telegram-bot-service, telegram-connector-service,
   whatsapp-personal-service, kommo-integration-service,
-  verification-bot-service, ai-bot-service) — это код с наибольшим риском
-  постоянной фоновой нагрузки (поллинг, синки, long-polling), а не только
-  запрос-ответ по требованию.
-- Общие библиотеки (`libs/shared_auth`, `libs/shared_metrics`) — код,
-  который выполняется на КАЖДОМ запросе КАЖДОГО сервиса; даже небольшая
-  неэффективность здесь умножается на количество сервисов и реплик.
-- Инфраструктурные конфиги (`helm/`, `docker-compose*.yml`, `deploy/`,
+  verification-bot-service, ai-bot-service) — this is the code with the
+  highest risk of constant background load (polling, syncs, long-polling), not
+  just request-response on demand.
+- Shared libraries (`libs/shared_auth`, `libs/shared_metrics`) — code that
+  runs on EVERY request of EVERY service; even a small inefficiency here is
+  multiplied by the number of services and replicas.
+- Infrastructure configs (`helm/`, `docker-compose*.yml`, `deploy/`,
   `infrastructure/`).
 
-По каждой зоне ищи (детальный чек-лист ниже) и для каждой находки
-указывай: file:line, тип проблемы, количественную оценку воздействия (или
-пометку "не измерено"), severity, статус (см. выше).
+For each zone, look for (detailed checklist below) and for each finding
+record: file:line, problem type, a quantitative impact estimate (or a "not
+measured" mark), severity, status (see above).
 
-### СРЕЗ 3 — Архитектурный обзор
+### PASS 3 — Architectural review
 
-Независимо от построчного разбора оцени, способна ли текущая архитектура
-УДЕРЖИВАТЬ экономичность при росте нагрузки, а не только не иметь явных
-проблем сегодня:
+Independently of the line-by-line review, assess whether the current
+architecture can HOLD economy as load grows, not just be free of obvious
+problems today:
 
-- "Болтливая" межсервисная архитектура: сколько последовательных
-  синхронных HTTP-вызовов делает один пользовательский запрос через
-  gateway → сервисы → сервисы (построй цепочку для 2-3 самых частых
-  сценариев: логин, список сделок/лидов, отправка сообщения в чат). Каждый
-  лишний хоп — это латентность и CPU/сеть, умноженные на трафик.
-- Оправданность фиксированного числа реплик (в
-  `docker-compose.microservices.yml` gateway поднят в 3 экземплярах и
-  т.п.) — есть ли данные о реальной нагрузке, оправдывающие это число, или
-  это "на всякий случай"? То же для аналогичных решений в helm-values
-  (replicaCount).
-- Дублирование общих библиотек (shared_auth, shared_metrics) по сервисам
-  вместо единого пакета — если производительный фикс/оптимизация сделаны в
-  одной копии, распространяется ли это автоматически на остальные, или
-  патч придётся катить N раз (тот же риск, что и для security-патчей).
-- Общая стратегия кэширования: есть ли она вообще как осознанное решение
-  (что кэшируется, на каком уровне, с какой инвалидацией), или кэш
-  добавляется точечно и бессистемно там, где кто-то один раз заметил
-  тормоза.
-- Совмещение OLTP-нагрузки (транзакционные сервисы) и тяжёлой аналитики
-  (Superset, analytics-service) на одной БД/инстансе — конкуренция за
-  ресурсы.
-- Наличие процесса: прогоняется ли нагрузочное тестирование (k6 в
-  `load-testing/`) регулярно или разово; есть ли бюджет производительности
-  (performance budget) для фронтенд-бандла и API-латентности, закреплённый
-  в CI, а не только "по ощущениям".
+- A "chatty" inter-service architecture: how many sequential synchronous HTTP
+  calls one user request makes through gateway → services → services (build
+  the chain for the 2-3 most frequent scenarios: login, deals/leads list,
+  sending a chat message). Every extra hop is latency and CPU/network,
+  multiplied by traffic.
+- Whether a fixed replica count is justified (in
+  `docker-compose.microservices.yml` the gateway is brought up in 3 instances,
+  etc.) — is there real load data justifying this number, or is it "just in
+  case"? The same for analogous decisions in helm-values (replicaCount).
+- Duplication of shared libraries (shared_auth, shared_metrics) across
+  services instead of a single package — if a performance fix/optimization is
+  made in one copy, does it propagate automatically to the rest, or does the
+  patch have to be rolled out N times (the same risk as for security patches)?
+- A general caching strategy: does one even exist as a deliberate decision
+  (what is cached, at what level, with what invalidation), or is a cache added
+  pinpoint and unsystematically wherever someone once noticed a slowdown?
+- Combining OLTP load (transactional services) and heavy analytics (Superset,
+  analytics-service) on the same DB/instance — contention for resources.
+- Presence of a process: is load testing (k6 in `load-testing/`) run regularly
+  or one-off; is there a performance budget for the frontend bundle and API
+  latency, enforced in CI rather than only "by feel"?
 
-## ДЕТАЛЬНЫЙ ЧЕК-ЛИСТ ПО КАТЕГОРИЯМ
+## DETAILED CATEGORY CHECKLIST
 
-1. **Асинхронный backend: блокирующие вызовы в event loop** — синхронные
-   HTTP-клиенты (requests и т.п.) вместо httpx.AsyncClient/aiohttp внутри
-   async-обработчиков; синхронный I/O (открытие файлов, time.sleep,
-   синхронные драйверы БД) внутри async def; CPU-тяжёлые операции (парсинг
-   больших JSON/XML, шифрование, обработка изображений) на event loop без
-   ThreadPoolExecutor/ProcessPoolExecutor; последовательные `await` там,
-   где вызовы независимы и могли бы идти параллельно через
-   `asyncio.gather` (типичный паттерн в gateway при обращении к нескольким
-   сервисам для сборки одного ответа).
-2. **База данных (PostgreSQL)** — N+1 запросы (цикл с запросом к БД
-   внутри, где можно один JOIN/`selectinload`/`joinedload`); отсутствующие
-   индексы на колонках в WHERE/ORDER BY/JOIN, особенно на внешних ключах
-   (user_id, tenant_id, integration_id) и мультитенантной фильтрации;
-   `SELECT *`/полная сериализация там, где нужны 2-3 поля; списковые
-   эндпоинты без пагинации/LIMIT; размер пула соединений относительно
-   числа реплик и лимита PostgreSQL; долгие транзакции с внешними
-   HTTP-вызовами внутри (категорически недопустимый паттерн); повторяющиеся
-   идентичные запросы в рамках одного request-response цикла.
-3. **Кэширование (Redis)** — ключи без TTL; отсутствие кэша для дорогих
-   часто повторяющихся и редко меняющихся вычислений (агрегаты дашбордов,
-   справочники, роли); cache stampede (нет lock/single-flight при
-   протухании); кэш без инвалидации при изменении исходных данных
-   (фиксируй отдельно как корректностную, не только perf-проблему);
-   KEYS/SCAN по всей базе в хот-пасе, хранение больших блобов вместо
-   специализированного хранилища.
-4. **Межсервисное взаимодействие (HTTP)** — отсутствие таймаутов на
-   исходящих запросах; отсутствие retry с exponential backoff (либо retry
-   без backoff — thundering herd при частичном инциденте); дублирующие
-   вызовы одного сервиса вместо batched-вызова; полная пересылка тяжёлых
-   payload там, где нужна часть данных.
-5. **Очереди (RabbitMQ) и фоновые обработчики** — prefetch/QoS (слишком
-   большой перегружает консьюмера, слишком маленький недоиспользует
-   параллелизм); poison message без DLQ; частота поллинга внешних API
-   (kommo-integration-service, telegram-connector-service,
-   whatsapp-personal-service) относительно реальной потребности, размер
-   батча, обработка rate-limit (429/ретраи).
-6. **Сериализация и размер payload** — Pydantic-модели, возвращающие
-   значительно больше полей, чем реально используется; логирование
-   целиком крупных объектов/payload в hot path; отсутствие сжатия
-   (gzip/brotli) на gateway для крупных JSON-ответов.
-7. **Frontend (React/Vite/TS)** — размер production-бандла и отсутствие
-   code-splitting/lazy-loading для редко используемых маршрутов;
-   неоптимизированные изображения/статические ассеты; избыточные
-   ре-рендеры на больших списках/таблицах (лидов/сделок) — отсутствие
-   виртуализации, новые объекты/колбэки в render без memo там, где
-   профайлер явно показывает горячую точку (не добавляй memo/useCallback
-   повсеместно "на всякий случай" — это тоже стоит ресурсов без измеренной
-   пользы); waterfall-загрузка данных вместо параллельной; слишком частый
-   polling там, где уместнее WebSocket/SSE, либо WebSocket с избыточными
-   reconnect/heartbeat.
-8. **Docker-образы** — размер финального образа по каждому Dockerfile
-   (services/*, the-frontend); отсутствие multi-stage build там, где
-   build-зависимости попадают в финальный слой; избыточный базовый образ
-   (full OS вместо slim/alpine/distroless), если это не создаёт проблем
-   совместимости.
-9. **Kubernetes/Helm** — resources requests/limits: отсутствующие (noisy
-   neighbor, OOM-kill) и одновременно завышенные "с запасом" без основания
-   на реальном потреблении; интервалы/таймауты liveness/readiness/startup
-   проб на большое число реплик; replicaCount и HPA-пороги — обоснованы ли
-   числами; init-контейнеры и стартовая логика подов — не блокируют ли
-   готовность дольше необходимого.
-10. **Наблюдаемость как источник накладных расходов** — кардинальность
-    метрик (shared_metrics): лейблы с высокой кардинальностью (user_id,
-    request_id как label вместо значения); частота/объём сэмплирования
-    трейсов; объём и уровень логирования в проде (DEBUG-логи "для
-    удобства"); синхронная отправка метрик/трейсов в hot path вместо
-    батчинга/асинхронной отправки.
-11. **Алгоритмическая эффективность и структуры данных** — квадратичные и
-    худшие по сложности операции над коллекциями, которые на реальных
-    объёмах данных станут узким местом (списки лидов/контактов/сообщений
-    чата растут со временем); повторный парсинг/пересчёт одних и тех же
-    данных в рамках одного запроса; ненужное глубокое копирование крупных
-    структур; отсутствие батчинга для массовых операций (импорт лидов,
-    синки с внешними CRM) там, где объём операций регулярно велик.
-12. **Нагрузочное тестирование и бюджеты производительности** —
-    актуальность k6-сценариев (load-testing/k6) относительно текущих
-    API-контрактов; расхождение между узкими местами, задокументированными
-    в load-testing/reports и load-testing/ANALYSIS_GUIDE.md, и текущим
-    состоянием кода (исправлены ли они на самом деле, или отчёт остался
-    неактуализированным — "исправлено на бумаге"); наличие или отсутствие
-    зафиксированных бюджетов производительности в CI (максимальный размер
-    бандла, максимальная латентность p95) — без такого гейта регрессии
-    производительности проникают в прод незамеченными.
+1. **Async backend: blocking calls in the event loop** — synchronous HTTP
+   clients (requests, etc.) instead of httpx.AsyncClient/aiohttp inside async
+   handlers; synchronous I/O (opening files, time.sleep, synchronous DB
+   drivers) inside `async def`; CPU-heavy operations (parsing large JSON/XML,
+   encryption, image processing) on the event loop without
+   ThreadPoolExecutor/ProcessPoolExecutor; sequential `await` where the calls
+   are independent and could go in parallel via `asyncio.gather` (a typical
+   pattern in the gateway when calling several services to assemble one
+   response).
+2. **Database (PostgreSQL)** — N+1 queries (a loop with a DB query inside where
+   one JOIN/`selectinload`/`joinedload` would do); missing indexes on columns
+   in WHERE/ORDER BY/JOIN, especially on foreign keys (user_id, tenant_id,
+   integration_id) and multi-tenant filtering; `SELECT *`/full serialization
+   where 2-3 fields are needed; list endpoints without pagination/LIMIT;
+   connection pool size relative to the number of replicas and the PostgreSQL
+   limit; long transactions with external HTTP calls inside (a categorically
+   unacceptable pattern); repeated identical queries within one request-response
+   cycle.
+3. **Caching (Redis)** — keys without TTL; absence of a cache for expensive,
+   frequently repeated, and rarely changing computations (dashboard aggregates,
+   reference data, roles); cache stampede (no lock/single-flight on
+   expiration); a cache without invalidation when the source data changes
+   (record separately as a correctness problem, not only a perf one); KEYS/SCAN
+   over the whole database in the hot path; storing large blobs instead of
+   specialized storage.
+4. **Inter-service communication (HTTP)** — absence of timeouts on outbound
+   requests; absence of retry with exponential backoff (or retry without
+   backoff — a thundering herd during a partial incident); duplicate calls to
+   one service instead of a batched call; full forwarding of heavy payloads
+   where only part of the data is needed.
+5. **Queues (RabbitMQ) and background handlers** — prefetch/QoS (too large
+   overloads the consumer, too small underuses parallelism); poison message
+   without DLQ; external-API polling frequency (kommo-integration-service,
+   telegram-connector-service, whatsapp-personal-service) relative to the real
+   need, batch size, rate-limit handling (429/retries).
+6. **Serialization and payload size** — Pydantic models returning
+   significantly more fields than are actually used; logging large
+   objects/payloads in full in the hot path; absence of compression
+   (gzip/brotli) on the gateway for large JSON responses.
+7. **Frontend (React/Vite/TS)** — production bundle size and absence of
+   code-splitting/lazy-loading for rarely used routes; unoptimized
+   images/static assets; excessive re-renders on large lists/tables
+   (leads/deals) — absence of virtualization, new objects/callbacks in render
+   without memo where the profiler clearly shows a hotspot (do not add
+   memo/useCallback everywhere "just in case" — that also costs resources
+   without a measured benefit); waterfall data loading instead of parallel;
+   too-frequent polling where WebSocket/SSE would be more appropriate, or a
+   WebSocket with excessive reconnect/heartbeat.
+8. **Docker images** — final image size per Dockerfile (services/*,
+   the-frontend); absence of multi-stage build where build dependencies end up
+   in the final layer; an oversized base image (full OS instead of
+   slim/alpine/distroless), if that does not create compatibility problems.
+9. **Kubernetes/Helm** — resources requests/limits: missing (noisy neighbor,
+   OOM-kill) and, at the same time, oversized "with a margin" without a basis
+   in real consumption; liveness/readiness/startup probe intervals/timeouts on
+   a large number of replicas; replicaCount and HPA thresholds — are they
+   justified by numbers; init containers and pod startup logic — do they block
+   readiness longer than necessary?
+10. **Observability as a source of overhead** — metric cardinality
+    (shared_metrics): high-cardinality labels (user_id, request_id as a label
+    instead of a value); trace sampling frequency/volume; logging volume and
+    level in prod (DEBUG logs "for convenience"); synchronous sending of
+    metrics/traces in the hot path instead of batching/async sending.
+11. **Algorithmic efficiency and data structures** — quadratic and
+    worse-complexity operations over collections that will become a bottleneck
+    at real data volumes (leads/contacts/chat-message lists grow over time);
+    repeated parsing/recomputation of the same data within one request;
+    unnecessary deep copying of large structures; absence of batching for bulk
+    operations (leads import, syncs with external CRMs) where the operation
+    volume is regularly large.
+12. **Load testing and performance budgets** — currency of the k6 scenarios
+    (load-testing/k6) relative to the current API contracts; discrepancy
+    between the bottlenecks documented in load-testing/reports and
+    load-testing/ANALYSIS_GUIDE.md and the current state of the code (are they
+    actually fixed, or did the report remain un-updated — "fixed on paper");
+    presence or absence of recorded performance budgets in CI (maximum bundle
+    size, maximum p95 latency) — without such a gate, performance regressions
+    slip into prod unnoticed.
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ
+## EDGE CASES OFTEN MISSED
 
-- "На dev-данных работает быстро" — проблема проявляется только на
-  реальных объёмах данных клиента (тысячи лидов, десятки тысяч сообщений в
-  чате); всегда прикидывай ожидаемый рост.
-- Отладочные удобства, забытые в проде: verbose-логирование, отключённое
-  сжатие ответов, отключённый кэш "чтобы было проще дебажить" — и не
-  включённые обратно.
-- Health/readiness-пробы, дёргающие БД или внешние сервисы на каждой
-  N-секундной проверке, умноженные на число реплик — суммарно заметная
-  фоновая нагрузка на БД без бизнес-пользы.
-- Несколько независимых сервисов, опрашивающих один и тот же внешний API
-  дублирующим образом вместо общего кэша/единой точки синхронизации.
-- Retry-логика без backoff, усиливающая нагрузку именно в момент
-  частичного инцидента (когда ресурсы и так в дефиците).
-- Тяжёлые аналитические запросы (Superset/analytics-service),
-  выполняющиеся на той же БД/инстансе, что и транзакционная нагрузка, в
-  часы пиковой нагрузки на CRM.
-- "Оптимизация ради оптимизации": кэш/мемоизация/денормализация,
-  добавленные без измеренной проблемы — увеличивают сложность и объём
-  кода, который надо содержать и который сам потребляет ресурсы (память
-  кэша, синхронизация), без доказанной выгоды. Фиксируй и такие находки —
-  предлагай упрощение.
-- Различия конфигурации между окружениями (dev/staging/prod) в
-  docker-compose/helm-values — оптимизация, сделанная для одного
-  окружения, может отсутствовать в другом.
-- Забытые после экспериментов feature flags, удваивающие работу (пишем в
-  старую и новую систему одновременно "на время миграции", которая давно
-  завершилась).
+- "Runs fast on dev data" — the problem shows only at real customer data
+  volumes (thousands of leads, tens of thousands of chat messages); always
+  estimate the expected growth.
+- Debug conveniences forgotten in prod: verbose logging, disabled response
+  compression, disabled cache "to make debugging easier" — and not turned back
+  on.
+- Health/readiness probes that hit the DB or external services on every
+  N-second check, multiplied by the number of replicas — in total a noticeable
+  background load on the DB with no business value.
+- Several independent services polling the same external API redundantly
+  instead of a shared cache/single synchronization point.
+- Retry logic without backoff, amplifying load precisely at the moment of a
+  partial incident (when resources are already scarce).
+- Heavy analytical queries (Superset/analytics-service) running on the same
+  DB/instance as the transactional load, during CRM peak load hours.
+- "Optimization for optimization's sake": a cache/memoization/denormalization
+  added without a measured problem — increases the complexity and volume of
+  code that must be maintained and that itself consumes resources (cache
+  memory, synchronization), without a proven benefit. Record such findings
+  too — propose simplification.
+- Configuration differences between environments (dev/staging/prod) in
+  docker-compose/helm-values — an optimization made for one environment may be
+  absent in another.
+- Feature flags forgotten after experiments, doubling the work (writing to the
+  old and the new system at once "during the migration", which finished long
+  ago).
 
-## ФОРМАТ ОТЧЁТА
+## REPORT FORMAT
 
-1. Executive summary (для руководства, без технического жаргона): что
-   расходует ресурсы заметнее всего, что можно оптимизировать без риска
-   для функциональности в первую очередь, ориентировочный эффект (в
-   терминах латентности/нагрузки/инфраструктурных ресурсов).
-2. Таблица KPI: число находок по severity (critical/high/medium/low),
-   число находок, подтверждённых измерением, vs "правдоподобно, но не
-   измерено"; ориентировочная суммарная экономия ресурсов при устранении
-   критичных находок, если её можно оценить.
-3. Если это повторный аудит — таблица сопоставления "пункт предыдущего
-   отчёта/load-testing отчёта → текущее состояние (file:line) → статус (не
-   исправлено / формально / выборочно / исправлено)".
-4. Раздел "исправлено, но не работает" отдельно (например: индекс добавлен
-   в миграции, но запрос всё равно делает seq scan из-за несовпадения
-   типов/функции в WHERE).
-5. Полный список находок с привязкой file:line, количественной оценкой
-   воздействия (или явной пометкой "не измерено" и что нужно для
-   измерения), severity и конкретной рекомендацией по исправлению (не
-   "оптимизировать запрос", а "добавить индекс на (tenant_id,
-   created_at)", "заменить N+1 на selectinload", "вынести вызов внешнего
-   API из тела транзакции").
-6. Раздел "что сделано хорошо" — эффективные паттерны в кодовой базе,
-   которые стоит тиражировать на другие сервисы, а не переделывать.
-7. План действий по срокам: быстрые точечные фиксы без риска регрессии
-   (индексы, таймауты, исправление N+1) — в первую очередь; изменения,
-   требующие тестирования под нагрузкой — во вторую; архитектурные решения
-   (пересмотр стратегии кэширования, сокращение числа межсервисных хопов,
-   план масштабирования) — как решения уровня руководства/тимлидов.
-8. Раздел "методология и ограничения покрытия" — какие инструменты и
-   измерения были использованы, какие сервисы/зоны НЕ были профилированы
-   или нагружены и почему (нет доступа к прод-метрикам, нет возможности
-   поднять окружение и т.п.), чтобы отсутствие находок в непокрытой зоне
-   не читалось как "там всё оптимально".
+1. Executive summary (for leadership, no technical jargon): what consumes
+   resources most noticeably, what can be optimized without risk to
+   functionality first, the approximate effect (in terms of
+   latency/load/infrastructure resources).
+2. KPI table: number of findings by severity (critical/high/medium/low),
+   number of findings confirmed by measurement vs "plausible but not
+   measured"; the approximate total resource savings from eliminating the
+   critical findings, if it can be estimated.
+3. If this is a re-audit — a comparison table "previous-report/load-testing
+   item → current state (file:line) → status (not fixed / on paper /
+   selectively / fixed)".
+4. A "fixed but not working" section separately (e.g. an index was added in the
+   migration, but the query still does a seq scan due to a type/function
+   mismatch in WHERE).
+5. Full list of findings tied to file:line, with a quantitative impact estimate
+   (or an explicit "not measured" mark and what is needed to measure it),
+   severity, and a concrete remediation recommendation (not "optimize the
+   query", but "add an index on (tenant_id, created_at)", "replace the N+1 with
+   selectinload", "move the external API call out of the transaction body").
+6. A "what was done well" section — efficient patterns in the codebase worth
+   replicating to other services rather than redoing.
+7. Action plan by timeframe: quick pinpoint fixes without regression risk
+   (indexes, timeouts, fixing N+1) — first; changes requiring testing under
+   load — second; architectural decisions (rethinking the caching strategy,
+   reducing the number of inter-service hops, a scaling plan) — as
+   leadership/team-lead-level decisions.
+8. A "methodology and coverage limitations" section — which tools and
+   measurements were used, which services/zones were NOT profiled or loaded and
+   why (no access to prod metrics, no ability to bring up the environment,
+   etc.), so the absence of findings in an uncovered zone does not read as
+   "everything there is optimal".
 
-## ПРАВИЛА ОФОРМЛЕНИЯ НАХОДОК
+## FINDING FORMATTING RULES
 
-Для каждой находки обязательны:
+For each finding, the following are mandatory:
 
-- Путь к файлу и номер строки (или диапазон).
-- Название проблемы и категория (см. чек-лист выше).
-- Количественная оценка воздействия: измеренная (число запросов к БД,
-  EXPLAIN ANALYZE вывод, время профилирования, размер бандла/образа в МБ,
-  латентность p50/p95) либо явно помеченная как неизмеренная оценка с
-  обоснованием, почему она вероятна.
-- Условие, при котором проблема становится критичной (объём данных, число
-  одновременных пользователей, частота вызова) — если оно не выполняется
-  сегодня, но выполнится при росте, укажи это явно, не занижай и не
-  завышай срочность.
-- Severity с обоснованием (какая доля трафика/данных затронута, какой
-  ресурс расходуется: CPU, RAM, сетевой трафик, число соединений с БД,
-  стоимость инфраструктуры).
-- Статус относительно предыдущего аудита/load-testing отчёта, если
-  применимо.
-- Рекомендация по исправлению — конкретная и с сохранением текущей
-  функциональности (аудит не должен предлагать менять поведение системы,
-  только эффективность его реализации).
+- The file path and line number (or range).
+- The problem name and category (see the checklist above).
+- A quantitative impact estimate: measured (number of DB queries, EXPLAIN
+  ANALYZE output, profiling time, bundle/image size in MB, p50/p95 latency) or
+  explicitly marked as an unmeasured estimate with justification for why it is
+  likely.
+- The condition under which the problem becomes critical (data volume, number
+  of concurrent users, call frequency) — if it does not hold today but will
+  hold as things grow, state it explicitly; do not under- or over-state the
+  urgency.
+- Severity with justification (what share of traffic/data is affected, which
+  resource is consumed: CPU, RAM, network traffic, number of DB connections,
+  infrastructure cost).
+- Status relative to the previous audit/load-testing report, if applicable.
+- A remediation recommendation — concrete and preserving the current
+  functionality (the audit should not propose changing the system's behavior,
+  only the efficiency of its implementation).
 
-## ЗАПУСК АУДИТА (практическая инструкция)
+## RUNNING THE AUDIT (practical instructions)
 
-1. Определи периметр: перечисли все backend-сервисы (services/*), фронтенд
-   (the-frontend), общие библиотеки (libs/*), фоновые боты/коннекторы,
-   инфраструктурные конфиги (helm/, docker-compose*.yml, deploy/,
-   infrastructure/), существующие нагрузочные тесты (load-testing/).
-2. Прочитай существующие артефакты нагрузочного тестирования
-   (load-testing/ANALYSIS_GUIDE.md, load-testing/reports) ПЕРЕД началом
-   ручного разбора — это готовый источник уже известных узких мест, не
-   дублируй работу, а проверь, устранены ли они.
-3. Запусти доступные инструменты СРЕЗА 1 по каждому сервису/образу/чарту,
-   где это возможно в текущем окружении; сохрани сырой вывод для
-   приложений к отчёту.
-4. Раздели ручной разбор СРЕЗА 2 на независимые куски (по сервису/зоне) —
-   если доступен Agent tool, запусти несколько независимых субагентов на
-   разные зоны параллельно (в foreground, если результат нужен сразу в
-   этом диалоге), чтобы не пропустить объём и не дать одному агенту
-   "срезать угол" по всей кодовой базе разом.
-5. Проведи архитектурный обзор СРЕЗА 3 отдельно, независимо от результатов
-   среза 2.
-6. Сведи все три среза в единый отчёт по формату выше, убери дубликаты, но
-   не объединяй находки разной природы (инструмент нашёл подозрительный
-   паттерн ≠ ручной разбор подтвердил реальное воздействие — фиксируй оба
-   факта, если они есть, с соответствующим статусом подтверждения).
-7. Если это повторный аудит — обязательно перепроверь КАЖДЫЙ пункт
-   предыдущего отчёта и каждую находку из load-testing/reports по текущему
-   состоянию кода, а не полагайся на статус, заявленный командой.
-8. Явно укажи, какие проверки НЕ были выполнены (нет доступа к
-   прод-метрикам/pg_stat_statements, нет возможности поднять окружение для
-   профилирования или прогона k6, нет данных о реальных объёмах клиентских
-   данных) — это часть честного отчёта, а не его слабость.
-9. Ни одна рекомендация не должна менять наблюдаемое поведение/
-   функциональность системы — только эффективность реализации. Если для
-   оптимизации неизбежно требуется изменение поведения (например,
-   ужесточение пагинации по умолчанию) — отметь это отдельно и явно.
+1. Determine the scope: list all backend services (services/*), the frontend
+   (the-frontend), shared libraries (libs/*), background bots/connectors,
+   infrastructure configs (helm/, docker-compose*.yml, deploy/,
+   infrastructure/), existing load tests (load-testing/).
+2. Read the existing load-testing artifacts (load-testing/ANALYSIS_GUIDE.md,
+   load-testing/reports) BEFORE starting the manual review — it is a ready
+   source of already known bottlenecks; don't duplicate work, just check
+   whether they are resolved.
+3. Run the available tools of PASS 1 on each service/image/chart where possible
+   in the current environment; save the raw output for report appendices.
+4. Split the manual review of PASS 2 into independent chunks (by service/zone)
+   — if the Agent tool is available, launch several independent subagents on
+   different zones in parallel (in foreground, if the result is needed
+   immediately in this dialogue), so as not to miss volume and not to let one
+   agent "cut corners" across the whole codebase at once.
+5. Perform the architectural review of PASS 3 separately, independently of the
+   PASS 2 results.
+6. Consolidate all three passes into a single report per the format above,
+   remove duplicates, but do not merge findings of different natures (a tool
+   found a suspicious pattern ≠ manual review confirmed real impact — record
+   both facts if both exist, with the corresponding confirmation status).
+7. If this is a re-audit — be sure to re-verify EACH item of the previous
+   report and each finding from load-testing/reports against the current state
+   of the code, rather than relying on the status claimed by the team.
+8. Explicitly state which checks were NOT performed (no access to prod
+   metrics/pg_stat_statements, no ability to bring up the environment for
+   profiling or a k6 run, no data on real customer data volumes) — this is part
+   of an honest report, not its weakness.
+9. No recommendation should change the observable behavior/functionality of the
+   system — only the efficiency of the implementation. If an optimization
+   inevitably requires a behavior change (e.g. tightening default pagination) —
+   note this separately and explicitly.
 
-Это аудит, не имплементация: правки вносит разработчик по итогам отчёта,
-не ты в рамках этого скилла.
+This is an audit, not implementation: the developer makes the changes based on
+the report, not you within this skill.
+

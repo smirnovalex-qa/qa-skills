@@ -1,247 +1,256 @@
 ---
 name: ci-qa-gate
-description: Проектирует, ревьюит и настраивает quality-gate в CI/CD пайплайне — что реально должно блокировать мерж и деплой (линт/формат/типы, unit+integration тесты, порог покрытия на diff, статический анализ/SAST, зависимости/SCA, secret-scan, E2E/smoke, миграции, IaC-скан), с проверкой что гейт действительно fail'ит билд, а не только предупреждает, что фидбэк быстрый и fail-fast, что flaky не блокируют ложно, и что сам пайплайн безопасен (script injection, pin версий actions, минимальные permissions токена). Используй когда просят «настрой quality gate», «добавь тесты/линт/покрытие в CI», «что должно блокировать мерж», «ревью пайплайна на QA-гейты», «gate по покрытию/безопасности», «pre-merge проверки», «сделай так чтобы красные тесты не давали смержить», «проверь наш CI на дыры в гейтах» — даже если слова «gate» нет, а говорят «почему упавшие тесты пропускают в main», «давай ужесточим проверки перед деплоем», «настрой pre-commit/pre-push». Скилл сначала определяет CI-систему проекта по конфигам и может РЕДАКТИРОВАТЬ/создавать CI-конфиг (осторожно, с объяснением) либо, если задача только ревью, выдать отчёт без изменений.
-argument-hint: "[путь к CI-конфигу / .github|.gitlab-ci|Jenkinsfile] [режим: настроить или только ревью] [фокус: покрытие/безопасность/скорость] — всё опционально"
+description: Designs, reviews, and configures a quality gate in a CI/CD pipeline — what should actually block a merge and a deploy (lint/format/types, unit+integration tests, coverage threshold on the diff, static analysis/SAST, dependencies/SCA, secret-scan, E2E/smoke, migrations, IaC scan), verifying that the gate really fails the build and does not just warn, that feedback is fast and fail-fast, that flaky tests do not block falsely, and that the pipeline itself is secure (script injection, pinned action versions, minimal token permissions). Use when asked "set up a quality gate", "add tests/lint/coverage to CI", "what should block a merge", "review the pipeline for QA gates", "a gate on coverage/security", "pre-merge checks", "make it so red tests can't be merged", "check our CI for holes in the gates" — even without the word "gate", when they say "why do failing tests get into main", "let's tighten the checks before deploy", "set up pre-commit/pre-push". The skill first detects the project's CI system from its configs and can EDIT/create the CI config (carefully, with explanation) or, if the task is review only, produce a report without changes.
+argument-hint: "[path to CI config / .github|.gitlab-ci|Jenkinsfile] [mode: configure or review only] [focus: coverage/security/speed] — all optional"
 ---
 
-# QA-гейт в CI/CD (проектирование, ревью и настройка quality gate)
+# CI/CD QA gate (designing, reviewing, and configuring a quality gate)
 
-Ты инженер по качеству/DevOps, который отвечает за то, чтобы плохой код
-физически не доезжал до main и до прода. Дисциплина: **гейт, который не
-блокирует, — это не гейт**. Главная и самая частая дыра — проверка, которая
-печатает предупреждение, но не фейлит билд (continue-on-error, `|| true`,
-не-required статус-чек, отчёт вместо exit-кода). Работай адверсариально: для
-каждого объявленного гейта проверь, что он реально останавливает мерж/деплой,
-а не создаёт видимость контроля.
+You are a quality/DevOps engineer responsible for making sure bad code
+physically cannot reach main and prod. The discipline: **a gate that does not
+block is not a gate**. The main and most common hole is a check that prints a
+warning but does not fail the build (continue-on-error, `|| true`, a non-required
+status check, a report instead of an exit code). Work adversarially: for each
+declared gate, verify that it really stops the merge/deploy rather than creating
+the appearance of control.
 
-Скилл авторский: ты можешь **создавать и редактировать** CI-конфиг, но делай это
-осторожно и с объяснением каждого изменения — сломанный пайплайн блокирует всю
-команду. Если задача — только ревью, выдай отчёт без изменений. Всегда сначала
-определи существующую CI-систему и текущие проверки, прежде чем что-то менять.
+This is an authoring skill: you can **create and edit** the CI config, but do it
+carefully and with an explanation of every change — a broken pipeline blocks the
+whole team. If the task is review only, produce a report without changes. Always
+first detect the existing CI system and the current checks before changing
+anything.
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (что за пайплайн и режим работы)
+## INPUT / SCOPE (which pipeline and which mode)
 
-`$ARGUMENTS` и контекст диалога задают периметр — определи и зафиксируй.
+`$ARGUMENTS` and the dialog context set the perimeter — determine and record it.
 
-- **A. РЕПОЗИТОРИЙ / CI-КОНФИГ** — найди и прочитай существующую конфигурацию
-  CI: `.github/workflows/*.yml` (GitHub Actions), `.gitlab-ci.yml` (GitLab CI),
+- **A. REPOSITORY / CI CONFIG** — find and read the existing CI configuration:
+  `.github/workflows/*.yml` (GitHub Actions), `.gitlab-ci.yml` (GitLab CI),
   `Jenkinsfile` (Jenkins), `.circleci/config.yml` (CircleCI),
   `azure-pipelines.yml` (Azure), `.pre-commit-config.yaml`, `bitbucket-
-  pipelines.yml`, `Makefile`/скрипты, вызываемые из CI. Периметр = весь набор
-  пайплайнов + настройки защиты веток (branch protection / merge request
-  approval rules), если к ним есть доступ.
-- **B. КОНКРЕТНЫЙ ПАЙПЛАЙН / ДЖОБА** — если указан один workflow/джоба, работай
-  по нему, но проверь связь с общей картиной (что ещё блокирует мерж помимо
-  него).
-- **C. РЕЖИМ** — «настроить/добавить» (можно менять конфиг) или «только ревью»
-  (отчёт без изменений). Если не указан — уточни; по умолчанию сначала ревью,
-  изменения — после согласования плана с пользователем.
+  pipelines.yml`, `Makefile`/scripts called from CI. The perimeter = the whole
+  set of pipelines + the branch protection settings (branch protection / merge
+  request approval rules), if you have access to them.
+- **B. A SPECIFIC PIPELINE / JOB** — if a single workflow/job is given, work on
+  it, but check its relation to the whole picture (what else blocks a merge
+  besides it).
+- **C. MODE** — "configure/add" (the config may be changed) or "review only" (a
+  report without changes). If not specified — clarify; by default, review first,
+  and make changes after agreeing the plan with the user.
 
-Определи **стек проекта**, чтобы выбрать правильные инструменты гейтов (по
+Determine the **project stack** in order to choose the right gate tools (from
 package.json / pyproject.toml / go.mod / pom.xml / Gemfile / composer.json):
-какие линтеры/форматтеры/тайп-чекеры, тест-раннеры, инструменты покрытия,
-SAST/SCA уже используются или уместны.
+which linters/formatters/type-checkers, test runners, coverage tools, SAST/SCA
+are already used or appropriate.
 
-Если CI в проекте нет вовсе — так и зафиксируй; предложи минимальный
-пайплайн под стек, но не навязывай тяжёлую систему без запроса.
+If the project has no CI at all — record that; propose a minimal pipeline for
+the stack, but do not force a heavy system without a request.
 
-Явно зафиксируй в начале: какая CI-система, какие пайплайны есть, что сейчас
-блокирует мерж/деплой, а что нет.
+Explicitly record at the start: which CI system, which pipelines exist, what
+currently blocks the merge/deploy and what does not.
 
-## КЛЮЧЕВОЙ ПРИНЦИП: ГЕЙТ ДОЛЖЕН РЕАЛЬНО БЛОКИРОВАТЬ
+## KEY PRINCIPLE: THE GATE MUST ACTUALLY BLOCK
 
-1. Для каждой проверки установи: она **fail'ит билд** (ненулевой exit, джоба
-   красная, статус-чек required) или только предупреждает? Ищи маскировку:
-   `continue-on-error: true`, `|| true`, `allow_failure: true`, `set +e`,
-   шаг, который печатает отчёт, но всегда завершается 0, необязательный
-   статус-чек, отсутствующий в branch protection.
-2. «Проверка есть в конфиге» ≠ «проверка блокирует мерж». В GitHub/GitLab
-   джоба может быть зелёной в PR, но не входить в required checks — мерж
-   пройдёт мимо неё. Сверься с branch protection / merge rules.
-3. Порог должен быть проверяемым и enforced: покрытие «желательно 80%» без
-   команды, которая фейлит билд при <80%, — это не гейт.
-4. Проверяй «братьев»: если гейт стоит на pull_request, но deploy идёт по
-   push в main напрямую в обход PR — гейт обходится.
-5. Не доверяй названию джобы («security-scan») — читай, что она реально
-   запускает и что делает с результатом.
+1. For each check, establish: does it **fail the build** (non-zero exit, red
+   job, required status check) or only warn? Look for masking:
+   `continue-on-error: true`, `|| true`, `allow_failure: true`, `set +e`, a step
+   that prints a report but always exits 0, an optional status check missing
+   from branch protection.
+2. "The check is in the config" ≠ "the check blocks the merge". In GitHub/GitLab
+   a job can be green in a PR but not be among the required checks — the merge
+   goes past it. Cross-check with branch protection / merge rules.
+3. The threshold must be verifiable and enforced: coverage "preferably 80%"
+   without a command that fails the build at <80% is not a gate.
+4. Check the "siblings": if the gate is on pull_request but the deploy goes by a
+   direct push to main bypassing the PR, the gate is bypassed.
+5. Do not trust the job name ("security-scan") — read what it actually runs and
+   what it does with the result.
 
-## УРОВНИ ГЕЙТОВ (проектируй по слоям, быстрое — раньше)
+## GATE LEVELS (design in layers, the fast ones earlier)
 
-Расположи проверки по стадиям: чем дешевле и быстрее — тем раньше, fail-fast.
+Arrange the checks by stage: the cheaper and faster — the earlier, fail-fast.
 
-### 1. Pre-commit / pre-push (локально, секунды)
-Быстрая обратная связь до пуша (через pre-commit/husky/lefthook — по стеку):
-- Линт и автоформат (eslint/ruff/gofmt/prettier/rubocop — по проекту).
-- Проверка типов, если применима (tsc/mypy).
-- Быстрый secret-scan на staged-файлах (gitleaks/detect-secrets).
-- Запрет коммита крупных бинарей/мусора.
-Помни: локальные хуки можно обойти (`--no-verify`) — они ускоряют фидбэк, но
-НЕ являются настоящим гейтом. Всё критичное дублируй на стороне CI.
+### 1. Pre-commit / pre-push (locally, seconds)
+Fast feedback before the push (via pre-commit/husky/lefthook — per the stack):
+- Lint and auto-format (eslint/ruff/gofmt/prettier/rubocop — per the project).
+- Type checking, if applicable (tsc/mypy).
+- A fast secret-scan on staged files (gitleaks/detect-secrets).
+- Prohibiting the commit of large binaries/junk.
+Remember: local hooks can be bypassed (`--no-verify`) — they speed up feedback
+but are NOT a real gate. Duplicate everything critical on the CI side.
 
-### 2. PR / pre-merge (обязательный гейт, минуты)
-Основной барьер. Всё здесь должно быть **required** в branch protection:
-- Линт/формат/типы (те же, но enforced на CI, не только локально).
-- **Unit + integration тесты** — все зелёные; ненулевой exit фейлит мерж.
-- **Покрытие с порогом** — предпочтительно на **diff/новом коде**
-  (`diff-cover`/встроенный diff-coverage), а не общий процент по репозиторию
-  (см. edge cases). Порог фейлит билд при недоборе.
-- **Статический анализ / SAST** (semgrep/bandit/CodeQL/sonar — по стеку) с
-  fail при находках заданного уровня.
-- **Зависимости / SCA** (pip-audit/npm audit/osv-scanner/dependabot-gate) —
-  fail при уязвимостях high/critical в прод-зависимостях.
-- **Secret-scan** по diff PR (gitleaks) — fail при найденном секрете.
-- Проверка миграций/схемы, если применимо (обратимость, отсутствие
-  запрещённых операций).
+### 2. PR / pre-merge (a mandatory gate, minutes)
+The main barrier. Everything here must be **required** in branch protection:
+- Lint/format/types (the same, but enforced on CI, not only locally).
+- **Unit + integration tests** — all green; a non-zero exit fails the merge.
+- **Coverage with a threshold** — preferably on the **diff/new code**
+  (`diff-cover`/built-in diff-coverage), not the overall repository percentage
+  (see edge cases). The threshold fails the build on a shortfall.
+- **Static analysis / SAST** (semgrep/bandit/CodeQL/sonar — per the stack) with
+  a fail on findings of the specified level.
+- **Dependencies / SCA** (pip-audit/npm audit/osv-scanner/dependabot-gate) — a
+  fail on high/critical vulnerabilities in production dependencies.
+- **Secret-scan** on the PR diff (gitleaks) — a fail on a found secret.
+- Migration/schema checks, if applicable (reversibility, absence of forbidden
+  operations).
 
-### 3. Pre-deploy (перед выкаткой на окружение)
-- **E2E / smoke** на staging-сборке (см. скилл smoke-suite) — fail деплой при
-  падении критического пути.
-- Проверка миграций против staging-БД (применяются и откатываются чисто).
-- **IaC-скан** (checkov/kube-linter/tfsec) по Dockerfile/helm/k8s/terraform,
-  если инфраструктура в репо.
-- Проверка, что деплой идёт именно с прошедшего гейт коммита (нет обходного
-  ручного деплоя мимо пайплайна).
+### 3. Pre-deploy (before rolling out to an environment)
+- **E2E / smoke** on the staging build (see the smoke-suite skill) — a fail of
+  the deploy on a critical-path failure.
+- Migration check against the staging DB (they apply and roll back cleanly).
+- **IaC scan** (checkov/kube-linter/tfsec) on the Dockerfile/helm/k8s/terraform,
+  if the infrastructure is in the repo.
+- A check that the deploy goes from exactly the commit that passed the gate (no
+  bypass manual deploy past the pipeline).
 
-## ПРИНЦИПЫ ХОРОШЕГО ГЕЙТА (проверяй и закладывай)
+## PRINCIPLES OF A GOOD GATE (verify and build in)
 
-1. **Реально блокирует** (см. ключевой принцип) — главное.
-2. **Быстрый фидбэк / fail-fast** — быстрые проверки (линт/типы) раньше
-   медленных (E2E); падение ранней стадии не запускает дорогие; параллелизм
-   независимых джоб.
-3. **Стабильность против flaky** — flaky-тест не должен ложно блокировать
-   команду и не должен «приучать» игнорировать красный билд. Заложи политику:
-   карантин (quarantine) явно помеченных flaky-тестов в отдельный
-   неблокирующий прогон + тикет на починку, ограниченный авто-ретрай ТОЛЬКО для
-   помеченных нестабильными (не глобальный ретрай, маскирующий реальные
-   падения). Глобальный `retries: 3` на все тесты — антипаттерн.
-4. **Понятный вывод при падении** — из лога видно, какая проверка и почему
-   упала, без раскопок; аннотации/отчёты в PR, где поддерживается.
-5. **Кэш зависимостей** — кэш пакетов/сборки, чтобы гейт был быстрым (но кэш не
-   должен влиять на корректность/безопасность результата).
-6. **Артефакты** — отчёты покрытия/тестов/сканеров публикуются как артефакты
-   для разбора.
-7. **Разумные пороги** — не «100% покрытия ради процента»: порог на diff/новом
-   коде, прагматичный уровень severity для SCA/SAST (блокировать high/critical,
-   не шуметь на info). Слишком строгий гейт команда научится обходить.
+1. **Actually blocks** (see the key principle) — the main thing.
+2. **Fast feedback / fail-fast** — fast checks (lint/types) before slow ones
+   (E2E); a failure of an early stage does not launch the expensive ones;
+   parallelism of independent jobs.
+3. **Robustness against flaky** — a flaky test must not falsely block the team
+   and must not "train" people to ignore a red build. Build in a policy:
+   quarantine of explicitly flagged flaky tests in a separate non-blocking run +
+   a ticket to fix them, a limited auto-retry ONLY for the ones flagged as
+   unstable (not a global retry that masks real failures). A global `retries: 3`
+   on all tests is an anti-pattern.
+4. **Clear output on failure** — from the log it is visible which check failed
+   and why, without digging; annotations/reports in the PR where supported.
+5. **Dependency cache** — a package/build cache so that the gate is fast (but
+   the cache must not affect the correctness/security of the result).
+6. **Artifacts** — coverage/test/scanner reports are published as artifacts for
+   analysis.
+7. **Reasonable thresholds** — not "100% coverage for the percentage's sake": a
+   threshold on the diff/new code, a pragmatic severity level for SCA/SAST
+   (block high/critical, do not be noisy on info). Too strict a gate and the
+   team will learn to bypass it.
 
-## БЕЗОПАСНОСТЬ САМОГО ПАЙПЛАЙНА (обязательно проверь)
+## SECURITY OF THE PIPELINE ITSELF (must verify)
 
-CI — это привилегированная среда; дыра в нём опаснее, чем в фиче:
-- **Script injection**: непроверенный внешний ввод (заголовок PR, имя ветки,
-  тело коммита, `github.event.*`) интерполируется прямо в `run:` — RCE в
-  раннере. Требуй передачи через env-переменные, а не inline-подстановку.
-- **Pin версий actions/образов**: сторонние actions запинены по полному
-  commit SHA, а не по плавающему тегу (`@v3`), который автор может переписать.
-  Базовые Docker-образы — по дайджесту, где критично.
-- **Минимальные permissions токена**: `permissions:` заданы явно и по
-  минимуму (по умолчанию read; write только там, где нужно). Нет глобального
-  `write-all`.
-- **Секреты**: не логируются, не доступны форк-PR (`pull_request_target`
-  с чекаутом кода форка — опасный паттерн), не передаются в недоверенные
-  сторонние actions.
-- **Гейт на изменение самого пайплайна**: правки в `.github/`/`.gitlab-ci.yml`
-  требуют ревью (нельзя ослабить гейт в том же PR, что проходит через него, без
-  апрува).
+CI is a privileged environment; a hole in it is more dangerous than in a
+feature:
+- **Script injection**: unchecked external input (a PR title, a branch name, a
+  commit body, `github.event.*`) is interpolated directly into `run:` — RCE in
+  the runner. Require passing it via env variables, not inline substitution.
+- **Pinning action/image versions**: third-party actions are pinned to a full
+  commit SHA, not a floating tag (`@v3`) that the author can rewrite. Base
+  Docker images — by digest where it is critical.
+- **Minimal token permissions**: `permissions:` are set explicitly and to the
+  minimum (read by default; write only where needed). No global `write-all`.
+- **Secrets**: not logged, not available to fork PRs (`pull_request_target` with
+  a checkout of the fork's code is a dangerous pattern), not passed to untrusted
+  third-party actions.
+- **A gate on changes to the pipeline itself**: edits to
+  `.github/`/`.gitlab-ci.yml` require review (the gate cannot be weakened in the
+  same PR that passes through it without an approval).
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ
+## EDGE CASES THAT ARE OFTEN MISSED
 
-- Джоба зелёная в PR, но не добавлена в required status checks — мерж проходит
-  мимо неё; гейта фактически нет.
-- `continue-on-error: true` / `allow_failure: true` / `|| true` превращают
-  «проверку» в декорацию — билд зелёный при упавшем шаге.
-- Порог покрытия задан на общий процент репозитория: старый большой код даёт
-  85%, а весь новый код PR не покрыт — гейт пропускает непротестированное.
-- Тест-раннер печатает «FAILED», но джоба зелёная, потому что exit-код
-  проглочен (`set +e`, отчёт в отдельном шаге, `; true`).
-- SAST/SCA настроен как «информационный» — выводит находки, но severity-gate
-  не фейлит; high/critical проезжают.
-- Деплой на прод запускается вручную/по тегу в обход PR-гейта — все pre-merge
-  проверки не применяются к тому, что реально выкатывается.
-- Глобальный авто-ретрай тестов маскирует реальные регрессии как «просто
-  флакнуло».
-- Форк-PR через `pull_request_target` получает доступ к секретам и выполняет
-  код форка — компрометация пайплайна.
-- Сторонний action по плавающему тегу `@v2` — автор незаметно подменяет код
-  (supply-chain).
-- Secret-scan гоняется только по последнему коммиту, а не по всему diff ветки —
-  секрет, добавленный и «удалённый» в промежуточном коммите, проходит.
-- Кэш зависимостей отравлен/используется как источник артефакта деплоя — гейт
-  проверил одно, задеплоилось другое.
-- Проверка миграций отсутствует — необратимая/блокирующая миграция проходит
-  гейт и падает на проде.
-- Гейт настроен на одну ветку (`main`), а релизы идут с `release/*` без тех же
-  проверок.
+- A job is green in the PR but not added to the required status checks — the
+  merge goes past it; the gate effectively does not exist.
+- `continue-on-error: true` / `allow_failure: true` / `|| true` turn a "check"
+  into decoration — the build is green with a failed step.
+- The coverage threshold is set on the overall repository percentage: old large
+  code gives 85%, while all the new code of the PR is uncovered — the gate lets
+  the untested code through.
+- The test runner prints "FAILED", but the job is green because the exit code is
+  swallowed (`set +e`, a report in a separate step, `; true`).
+- SAST/SCA is configured as "informational" — it prints findings, but the
+  severity gate does not fail; high/critical get through.
+- A production deploy is launched manually/by a tag bypassing the PR gate — all
+  the pre-merge checks do not apply to what is actually rolled out.
+- A global test auto-retry masks real regressions as "just flaked".
+- A fork PR via `pull_request_target` gets access to secrets and executes the
+  fork's code — a compromise of the pipeline.
+- A third-party action on a floating tag `@v2` — the author silently swaps the
+  code (supply chain).
+- The secret-scan runs only on the last commit, not the whole branch diff — a
+  secret added and "removed" in an intermediate commit gets through.
+- The dependency cache is poisoned/used as the source of the deploy artifact —
+  the gate checked one thing, another got deployed.
+- The migration check is missing — an irreversible/blocking migration passes the
+  gate and fails in prod.
+- The gate is configured on one branch (`main`), while releases go from
+  `release/*` without the same checks.
 
-## КРИТЕРИИ ГОТОВНОСТИ ГЕЙТА (DoD)
+## GATE DEFINITION OF DONE (DoD)
 
-- Каждая объявленная проверка **реально блокирует** мерж/деплой (подтверждено:
-  fail-поведение + required-статус/branch protection).
-- Покрытие enforced на diff/новом коде с проверяемым порогом.
-- Есть блокирующие: тесты, линт/типы, SAST, SCA, secret-scan (на pre-merge);
-  E2E/smoke и IaC-скан (на pre-deploy, если применимо).
-- flaky-политика описана (карантин + точечный ретрай), нет глобального ретрая.
-- Быстрые проверки идут раньше медленных; независимое параллелится; есть кэш.
-- Пайплайн безопасен: нет script injection, actions запинены, permissions
-  минимальны, форк-PR не получает секретов.
-- Если конфиг менялся — изменения объяснены, пайплайн синтаксически валиден,
-  не сломан существующий флоу.
-- Отчёт фиксирует, что настроено и **чего ещё не хватает** (что вне доступа —
-  например, branch protection настраивается в UI/через админ-доступ).
+- Every declared check **actually blocks** the merge/deploy (confirmed:
+  fail-behavior + required-status/branch protection).
+- Coverage is enforced on the diff/new code with a verifiable threshold.
+- There are blocking ones: tests, lint/types, SAST, SCA, secret-scan (at
+  pre-merge); E2E/smoke and IaC scan (at pre-deploy, if applicable).
+- The flaky policy is described (quarantine + targeted retry), there is no
+  global retry.
+- Fast checks come before slow ones; the independent ones are parallelized;
+  there is a cache.
+- The pipeline is secure: no script injection, actions are pinned, permissions
+  are minimal, fork PRs do not get secrets.
+- If the config was changed — the changes are explained, the pipeline is
+  syntactically valid, the existing flow is not broken.
+- The report records what was configured and **what is still missing** (what is
+  out of reach — for example, branch protection is configured in the UI/via
+  admin access).
 
-## ФОРМАТ РЕЗУЛЬТАТА
+## RESULT FORMAT
 
-Сохрани отчёт в `docs/qa/ci-gate/<scope>.md` (slug — по репозиторию/пайплайну;
-следуй существующей структуре, иначе создай `docs/qa/ci-gate/`). Если менял
-конфиг — перечисли изменённые файлы. Структура:
+Save the report to `docs/qa/ci-gate/<scope>.md` (the slug — by the
+repository/pipeline; follow the existing structure, otherwise create
+`docs/qa/ci-gate/`). If you changed the config — list the changed files.
+Structure:
 
-1. **Вердикт одной фразой**: гейт надёжен / есть дыры (пропускает X) / гейта
-   фактически нет.
-2. **Executive summary** — что блокирует мерж/деплой сейчас, где дыры, чем
-   рискуем.
-3. **SCOPE** — CI-система, найденные пайплайны, режим (настройка/ревью).
-4. **Текущее состояние** — таблица: проверка → на какой стадии → реально
-   блокирует? (да/нет/предупреждение) → доказательство (file:line в конфиге,
-   статус required).
-5. **Найденные дыры** — каждая с file:line, конкретным сценарием обхода
-   («деплой по тегу минует pre-merge гейт»), severity, рекомендацией.
-6. **Что настроено/изменено** (если режим «настроить») — какие файлы правил,
-   что добавил, почему; либо предложенный конфиг для согласования.
-7. **Чего не хватает / план** — недостающие гейты по приоритету; что требует
-   доступа вне репозитория (branch protection в UI, секреты, права).
-8. **Что НЕ проверено** — нет доступа к настройкам защиты веток/раннерам/
-   секретам, не удалось прогнать пайплайн и т.п.
+1. **One-line verdict**: the gate is reliable / has holes (lets X through) / the
+   gate effectively does not exist.
+2. **Executive summary** — what blocks the merge/deploy now, where the holes
+   are, what we are risking.
+3. **SCOPE** — CI system, pipelines found, mode (configuration/review).
+4. **Current state** — a table: check → at which stage → actually blocks?
+   (yes/no/warning) → evidence (file:line in the config, required status).
+5. **Holes found** — each with file:line, a concrete bypass scenario ("a deploy
+   by tag skips the pre-merge gate"), severity, a recommendation.
+6. **What was configured/changed** (if the mode is "configure") — which files
+   you edited, what you added, why; or the proposed config for agreement.
+7. **What is missing / plan** — the missing gates by priority; what requires
+   access outside the repository (branch protection in the UI, secrets,
+   permissions).
+8. **What was NOT verified** — no access to the branch protection
+   settings/runners/secrets, could not run the pipeline, etc.
 
-## ПРАВИЛА РЕДАКТИРОВАНИЯ КОНФИГА
+## CONFIG EDITING RULES
 
-- Перед изменением покажи план (что и зачем меняешь); критичные изменения
-  (ужесточение гейта, новые required-проверки) согласуй, чтобы не заблокировать
-  команду внезапно.
-- Не ослабляй существующие проверки без явного запроса. Не отключай гейты ради
-  «зелёного билда».
-- Сохраняй синтаксическую валидность (проверь YAML/синтаксис); не ломай
-  существующие джобы. Где возможно — вводи новый гейт сначала неблокирующим с
-  тикетом на включение, если немедленная блокировка обрушит текущие PR (и явно
-  это отметь как временную меру).
-- Секреты — только через механизм секретов CI, никогда inline.
+- Before a change, show the plan (what and why you are changing); agree on
+  critical changes (tightening the gate, new required checks) so as not to block
+  the team suddenly.
+- Do not weaken existing checks without an explicit request. Do not disable
+  gates for the sake of a "green build".
+- Preserve syntactic validity (check the YAML/syntax); do not break existing
+  jobs. Where possible, introduce a new gate first as non-blocking with a ticket
+  to enable it, if immediate blocking would break the current PRs (and flag this
+  explicitly as a temporary measure).
+- Secrets — only via the CI secrets mechanism, never inline.
 
-## ЗАПУСК (практическая инструкция)
+## EXECUTION (practical instructions)
 
-1. Сначала САМ определи SCOPE: найди и прочитай все CI-конфиги, определи
-   систему и режим (настройка/ревью) — не делегируй, зависит от контекста.
-2. Составь карту текущего состояния: что за проверки, на каких стадиях, что
-   реально блокирует (сверься с branch protection/merge rules, если доступны).
-3. Прогони по ключевому принципу и чек-листу безопасности пайплайна каждую
-   джобу — ищи маскировку fail'а, обходные пути деплоя, script injection,
-   незапиненные actions, широкие permissions.
-4. Если объём большой и доступен Agent tool — делегируй анализ отдельных
-   пайплайнов субагентам, передав им конкретные пути и релевантные разделы
-   (субагент не видит этот файл); собери находки в промежуточный файл.
-5. В режиме «настроить» — внеси изменения по плану с объяснением, сохрани
-   валидность, по возможности запусти/провалидируй пайплайн (act/линтер
-   workflow/dry-run) и покажи результат. В режиме «ревью» — только отчёт.
-6. Оформи отчёт с вердиктом одной фразой и списком того, чего не хватает и что
-   вне доступа.
+1. First, YOURSELF determine the SCOPE: find and read all the CI configs,
+   determine the system and the mode (configuration/review) — do not delegate,
+   it depends on the context.
+2. Build a map of the current state: what checks, at which stages, what actually
+   blocks (cross-check with branch protection/merge rules, if available).
+3. Run every job through the key principle and the pipeline-security checklist —
+   look for fail masking, deploy bypasses, script injection, unpinned actions,
+   broad permissions.
+4. If the volume is large and the Agent tool is available, delegate the analysis
+   of individual pipelines to subagents, giving them the specific paths and the
+   relevant sections (the subagent does not see this file); gather the findings
+   into an intermediate file.
+5. In "configure" mode — make the changes per the plan with an explanation,
+   preserve validity, where possible run/validate the pipeline (act/a workflow
+   linter/dry-run) and show the result. In "review" mode — a report only.
+6. Produce the report with a one-line verdict and a list of what is missing and
+   what is out of reach.
 
-Это авторский скилл: если правишь конфиг — делай изменения аккуратными,
-объяснёнными и не ломающими пайплайн; цель — гейт, который реально держит
-качество, а не создаёт видимость и не парализует команду.
+This is an authoring skill: if you edit the config — make the changes careful,
+explained, and non-breaking to the pipeline; the goal is a gate that really
+holds quality, not one that creates the appearance and paralyzes the team.
+

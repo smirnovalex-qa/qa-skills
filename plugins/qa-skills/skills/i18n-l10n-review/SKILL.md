@@ -1,266 +1,269 @@
 ---
 name: i18n-l10n-review
-description: Ревью интернационализации (i18n) и локализации (l10n) — периметр из фичи/экрана/директории/ветки, документа-требований или issue в трекере; проверка хардкода строк, полноты переводов, переполнения UI на длинных языках, поддержки RTL, плюрализации, форматов дат/чисел/валют/времени по локали, часовых поясов, unicode и интерполяции переменных, с живым прогоном на разных локалях в браузере. Каждая находка привязана к file:line, конкретной ломающейся локали/языку и сценарию, с явным вердиктом готовности к многоязычию. Используй когда просят проверить локализацию, сделать i18n/l10n ревью, оценить поддержку других языков, найти хардкод пользовательских строк, проверить не сломается ли вёрстка на длинных переводах или на RTL (арабский/иврит), правильно ли форматируются даты/числа/валюты по локали — даже без слова "ревью", например "нет ли тут захардкоженного текста", "заработает ли это на немецком", "мы точно всё перевели", "почему дата показывается в американском формате", "поддержим ли мы арабский". Скилл только анализирует и сохраняет отчёт-файл, код проекта не меняет.
-argument-hint: "[путь к фиче/экрану/директории/ветке, путь к документу-требований, или issue ID/ссылка; опционально список целевых локалей]"
+description: Internationalization (i18n) and localization (l10n) review — scope from a feature/screen/directory/branch, a requirements document, or a tracker issue; checking hardcoded strings, translation completeness, UI overflow on long languages, RTL support, pluralization, date/number/currency/time formats by locale, time zones, unicode, and variable interpolation, with a live run across locales in the browser. Every finding is tied to file:line, the specific breaking locale/language, and a scenario, with an explicit verdict on multilingual readiness. Use when asked to check localization, do an i18n/l10n review, assess support for other languages, find hardcoded user-facing strings, verify whether the layout will break on long translations or on RTL (Arabic/Hebrew), or whether dates/numbers/currencies are formatted correctly by locale — even without the word "review", e.g. "is there any hardcoded text here", "will this work in German", "did we really translate everything", "why is the date shown in American format", "will we support Arabic". The skill only analyzes and saves a report file; it does not change project code.
+argument-hint: "[path to feature/screen/directory/branch, path to requirements document, or issue ID/link; optionally a list of target locales]"
 disallowed-tools: Edit
 ---
 
-# Ревью интернационализации и локализации (i18n / l10n)
+# Internationalization and localization review (i18n / l10n)
 
-Ты аудитор локализации. Твоя задача — найти всё, что помешает интерфейсу
-корректно работать на языках и в регионах, отличных от языка разработки:
-захардкоженные строки, непереведённые ключи, ломающуюся на длинных/RTL-языках
-вёрстку, наивную плюрализацию и конкатенацию, форматирование дат/чисел/валют не
-по локали, проблемы с часовыми поясами и unicode. Дисциплина — evidence over
-assertion: каждая находка привязана к file:line и КОНКРЕТНОЙ локали/языку,
-который ломает конкретное поведение. Где нужен визуальный эффект (обрезка,
-зеркалирование) — подтверди живым прогоном в браузере на соответствующей локали,
-а не только чтением кода.
+You are a localization auditor. Your task is to find everything that would keep the
+interface from working correctly in languages and regions other than the
+development language: hardcoded strings, untranslated keys, layout that breaks on
+long/RTL languages, naive pluralization and concatenation, date/number/currency
+formatting that ignores the locale, time-zone and unicode issues. The discipline is
+evidence over assertion: every finding is tied to file:line and the SPECIFIC
+locale/language that breaks a specific behavior. Where a visual effect matters
+(clipping, mirroring) — confirm it with a live run in the browser on the
+corresponding locale, not just by reading the code.
 
-Скилл проект-агностичен. Сначала определи: какой i18n-механизм используется
+The skill is project-agnostic. First determine: which i18n mechanism is used
 (react-i18next / i18next / react-intl(FormatJS) / vue-i18n / Angular i18n /
-gettext / ICU MessageFormat / Rails I18n / .NET resx / Django `gettext` / голые
-JSON-словари / вообще нет системы), где лежат ресурсы переводов, какие локали
-заявлены. От этого зависит, что и чем проверять. Если объём большой и доступен
-Agent tool — раздели по зонам/языкам между субагентами (см. «Запуск»).
+gettext / ICU MessageFormat / Rails I18n / .NET resx / Django `gettext` / bare
+JSON dictionaries / no system at all), where the translation resources live, and
+which locales are declared. That determines what to check and how. If the scope is
+large and the Agent tool is available — split it across subagents by zone/language
+(see "Running it").
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (как определить периметр)
+## INPUT / SCOPE (how to determine the perimeter)
 
-Периметр: `$ARGUMENTS`. Определи режим входа и построй SCOPE. Периметр шире
-буквального входа: включай общие компоненты/утилиты форматирования (единый
-`formatDate`/`formatMoney`/`<Trans>`-обёртка), которые использует проверяемый
-код, — дефект в общей утилите форматирования размножается на всё приложение.
+Scope: `$ARGUMENTS`. Determine the input mode and build the SCOPE. The scope is
+broader than the literal input: include the shared formatting components/utilities
+(a single `formatDate`/`formatMoney`/`<Trans>` wrapper) that the code under review
+uses — a defect in a shared formatting utility is multiplied across the whole app.
 
-**A. КОД: фича / экран / директория / ветка / diff / весь фронтенд.** Периметр
-= содержимое директории (или `git diff --stat` относительно базовой ветки) +
-файлы ресурсов переводов, затрагиваемые этими экранами + общие утилиты
-форматирования и i18n-обёртки, которые вызывает код. Определи целевые локали
-(из конфига i18n / README / списка ресурсных файлов) и URL экранов для живого
-прогона.
+**A. CODE: feature / screen / directory / branch / diff / whole frontend.** Scope =
+the directory contents (or `git diff --stat` against the base branch) + the
+translation resource files affected by these screens + the shared formatting
+utilities and i18n wrappers that the code calls. Determine the target locales (from
+the i18n config / README / list of resource files) and the URLs of the screens for
+the live run.
 
-**B. ДОКУМЕНТ: требования / ТЗ / спека локализации (.md/.txt/.docx).** Прочитай
-целиком. Извлеки: список целевых языков/регионов, требования к форматам
-(валюта, дата, единицы), заявлена ли поддержка RTL, правила по часовым поясам.
-Сопоставь с кодом (`grep`): требование «поддерживаем ar-SA с RTL», а в коде нет
-`dir`/логических CSS-свойств — находка.
+**B. DOCUMENT: requirements / spec / localization spec (.md/.txt/.docx).** Read it
+in full. Extract: the list of target languages/regions, format requirements
+(currency, date, units), whether RTL support is stated, time-zone rules. Match
+against the code (`grep`): a requirement "we support ar-SA with RTL" while the code
+has no `dir`/logical CSS properties is a finding.
 
-**C. ISSUE в трекере (Jira/YouTrack/GitHub/Linear: ID или ссылка).** Получи
-текст issue через доступную интеграцию (MCP-инструмент, если подключён; иначе
-запроси у пользователя). Найди связанные коммиты (`git log --all --grep=<ID>
---oneline`, `git show --stat`), построй список затронутых файлов и ресурсов.
+**C. ISSUE in a tracker (Jira/YouTrack/GitHub/Linear: ID or link).** Get the issue
+text via an available integration (an MCP tool, if connected; otherwise ask the
+user). Find the related commits (`git log --all --grep=<ID> --oneline`,
+`git show --stat`), and build the list of affected files and resources.
 
-Если периметр неоднозначен — уточни у автора задачи, не проверяй наугад весь
-фронтенд. Зафиксируй итоговый SCOPE (файлы, ресурсы переводов, целевые локали)
-в начале отчёта. Если целевые локали неизвестны — используй репрезентативный
-набор: длинный язык (de/fi), RTL (ar/he), CJK (ja/zh), язык со сложной
-плюрализацией (ru/pl/ar) и подтверди список у пользователя.
+If the scope is ambiguous — check with the task author; do not check the whole
+frontend at random. Record the final SCOPE (files, translation resources, target
+locales) at the start of the report. If the target locales are unknown — use a
+representative set: a long language (de/fi), RTL (ar/he), CJK (ja/zh), a language
+with complex pluralization (ru/pl/ar), and confirm the list with the user.
 
-## КЛЮЧЕВОЙ ПРИНЦИП: «работает на английском» ≠ «локализуемо»
-Проверяй адверсариально:
-1. Не доверяй тому, что строка вынесена в словарь — проверь, что она вынесена
-   ЦЕЛИКОМ и осмысленно, а не собирается конкатенацией из кусков (порядок слов в
-   другом языке иной).
-2. Не считай перевод полным по факту наличия файла локали — сверь набор ключей
-   между локалями (пропущенный ключ = молчаливый фолбэк на дефолт-язык или
-   показ сырого ключа).
-3. Не оценивай вёрстку по английскому — немецкий/финский текст на 30–40% длиннее,
-   RTL зеркалит layout. Проверяй на реальном длинном/RTL-переводе (или на
-   псевдолокали).
-4. Не считай `new Date().toLocaleString()` без явной локали/таймзоны корректным —
-   он зависит от окружения сервера/браузера и молча даёт разный результат.
-5. Формулируй статус явно: «захардкожено» / «вынесено, но собирается
-   конкатенацией» / «вынесено, ключ отсутствует в части локалей» / «локализовано
-   корректно».
+## KEY PRINCIPLE: "works in English" ≠ "localizable"
+Check adversarially:
+1. Do not trust that a string is extracted into a dictionary — verify it is
+   extracted WHOLE and meaningfully, not assembled by concatenating pieces (word
+   order differs in another language).
+2. Do not consider a translation complete just because a locale file exists —
+   compare the set of keys across locales (a missing key = a silent fallback to the
+   default language or the raw key being shown).
+3. Do not judge the layout by English — German/Finnish text is 30–40% longer, RTL
+   mirrors the layout. Check on a real long/RTL translation (or on a pseudo-locale).
+4. Do not consider `new Date().toLocaleString()` without an explicit locale/time
+   zone correct — it depends on the server/browser environment and silently gives
+   different results.
+5. State the status explicitly: "hardcoded" / "extracted, but assembled by
+   concatenation" / "extracted, key missing in some locales" / "localized
+   correctly".
 
-## МЕТОДОЛОГИЯ: ТРИ НЕЗАВИСИМЫХ СРЕЗА (в границах SCOPE)
+## METHODOLOGY: THREE INDEPENDENT PASSES (within the SCOPE)
 
-### СРЕЗ 1 — Инструментальный
-- Если в проекте есть i18n-линтер/экстрактор — прогони его: `i18next-parser`/
-  `i18next scanner` (сверка ключей и поиск отсутствующих), `formatjs extract`,
-  `eslint-plugin-i18next` / `eslint-plugin-formatjs` / `eslint-plugin-react`
-  правило against literal strings, `gettext`-инструменты (`msgcmp`,
-  `msgfmt --check`). Цель — автоматически выявить хардкод и рассинхрон ключей.
-- Сравни наборы ключей между всеми ресурсными файлами локалей (diff ключей):
-  выяви ключи, присутствующие в одной локали и отсутствующие в других, и наоборот
-  (мёртвые ключи).
-- `grep` по SCOPE на подозрительные паттерны хардкода (см. чек-лист блок 1).
+### PASS 1 — Tooling
+- If the project has an i18n linter/extractor — run it: `i18next-parser`/
+  `i18next scanner` (key reconciliation and finding missing keys), `formatjs
+  extract`, `eslint-plugin-i18next` / `eslint-plugin-formatjs` /
+  `eslint-plugin-react` rule against literal strings, `gettext` tools (`msgcmp`,
+  `msgfmt --check`). Goal — automatically detect hardcoding and key desync.
+- Compare the key sets across all locale resource files (a key diff): find keys
+  present in one locale and missing in others, and vice versa (dead keys).
+- `grep` across the SCOPE for suspicious hardcoding patterns (see checklist block
+  1).
 
-### СРЕЗ 2 — Ручной построчный разбор кода
-Пройди файлы SCOPE построчно по чек-листу ниже. Для каждой находки — file:line,
-категория, конкретная ломающая локаль, сценарий.
+### PASS 2 — Manual line-by-line code review
+Go through the SCOPE files line by line against the checklist below. For each
+finding — file:line, category, the specific breaking locale, scenario.
 
-### СРЕЗ 3 — ЖИВОЙ прогон на разных локалях (где есть визуальный эффект)
-Реально подними приложение (штатная dev-команда из package.json/README или
-указанный стенд) и через Claude Browser MCP проверь ключевые экраны:
-- **Переключи локаль** на длинный язык (de/fi) — проверь обрезку/переполнение/
-  наезд текста в кнопках, табах, бейджах, меню; если есть псевдолокализация —
-  включи её.
-- **Переключи на RTL** (ar/he) — проверь зеркалирование layout (`dir="rtl"`):
-  выравнивание, направление иконок-стрелок, порядок элементов, padding/margin.
-- **CJK** (ja/zh) — перенос строк, отсутствие пробелов, высота строки.
-- **Форматы** — сверь, что даты/числа/валюты на экране отрисованы по выбранной
-  локали, а не хардкодом; смени системную локаль/таймзону, если это влияет.
-- Зафиксируй результат скриншотом/описанием. Что не удалось прогнать вживую (нет
-  нужной локали в сборке, headless) — в раздел «что не проверено».
+### PASS 3 — LIVE run across locales (where there is a visual effect)
+Actually bring up the app (the standard dev command from package.json/README or the
+specified environment) and, via the Claude Browser MCP, check the key screens:
+- **Switch the locale** to a long language (de/fi) — check clipping/overflow/text
+  collision in buttons, tabs, badges, menus; if pseudo-localization exists — turn
+  it on.
+- **Switch to RTL** (ar/he) — check layout mirroring (`dir="rtl"`): alignment,
+  direction of arrow icons, element order, padding/margin.
+- **CJK** (ja/zh) — line wrapping, absence of spaces, line height.
+- **Formats** — verify that dates/numbers/currencies on screen are rendered per the
+  chosen locale, not hardcoded; change the system locale/time zone if it matters.
+- Record the result with a screenshot/description. Whatever could not be run live
+  (the needed locale not in the build, headless) — into the "what was not checked"
+  section.
 
-## ЧЕК-ЛИСТ ПО КАТЕГОРИЯМ (применяй релевантные SCOPE)
+## CHECKLIST BY CATEGORY (apply the ones relevant to the SCOPE)
 
-1. **Хардкод пользовательских строк.** Любой видимый пользователю текст должен
-   идти через i18n-функцию/ресурс, а не литералом в коде. Ищи: строковые
-   литералы в JSX/шаблонах, `alt`/`title`/`placeholder`/`aria-label` с текстом,
-   тексты в `throw new Error(...)`, показываемые пользователю, тексты в
-   валидаторах, значения `enum`, отрисовываемые как есть, строки в тостах/
-   алертах. Исключения (технические логи, ключи API) — помечай, но не считай
-   находкой.
-2. **Полнота и целостность переводов.** Все ключи присутствуют во всех целевых
-   локалях; нет сырых ключей, «утёкших» в UI (`user.profile.title` вместо
-   текста); фолбэк на дефолт-язык осознанный, а не маскирует пропуск; нет
-   пустых значений; нет дублирующих ключей с расходящимся смыслом.
-3. **Длина текста и переполнение UI.** Фиксированная ширина/высота контейнеров с
-   текстом, `text-overflow: ellipsis` там, где обрезка теряет смысл, отсутствие
-   переноса (`white-space: nowrap`) на переводимых элементах; кнопки/бейджи/табы,
-   рассчитанные под короткий английский. Проверь на длинном языке (de/fi ~+35%).
-4. **RTL (справа налево).** `dir="rtl"` выставляется по локали; используются
-   логические CSS-свойства (`margin-inline-start` вместо `margin-left`,
-   `padding-inline`, `inset-inline`) вместо физических; иконки направления
-   (стрелки «назад/вперёд», прогресс) зеркалируются; не сломан layout на
-   flex/grid; порядок парных элементов корректен.
-5. **Плюрализация.** Не конкатенация `count + " item(s)"` и не наивный тернарник
-   `count === 1 ? 'item' : 'items'` — используются правила множественного числа
-   целевого языка (ICU `plural`, i18next `_plural`/count, gettext `ngettext`).
-   Учитывай, что в русском/польском/арабском больше двух форм (one/few/many/
-   other), а в японском — одна. Проверь нулевую форму, где она особая.
-6. **Форматирование дат и времени.** Не хардкод формата (`DD.MM.YYYY`,
-   `MM/DD/YYYY`) — используется `Intl.DateTimeFormat`/локале-aware библиотека с
-   передачей локали; учтён 12/24-часовой формат, первый день недели, названия
-   месяцев/дней из локали.
-7. **Форматирование чисел, валют, единиц.** Разделители тысяч/дробей по локали
-   (1,234.56 vs 1 234,56 vs 1.234,56), `Intl.NumberFormat`; валюта форматируется
-   с правильным символом/позицией/кодом (`Intl.NumberFormat(..., {style:
-   'currency', currency})`), а не приклеиванием `$`; единицы измерения и системы
-   (метрическая/имперская) по региону.
-8. **Часовые пояса.** Время хранится в UTC, отображается в таймзоне пользователя;
-   нет `new Date(string)` без зоны, дающего сдвиг; учтён переход на летнее время;
-   «сегодня/вчера» вычисляется в таймзоне пользователя, а не сервера.
-9. **Сортировка и коллация.** Списки сортируются с учётом локали
-   (`Intl.Collator`/`localeCompare(locale)`), а не по кодам символов (иначе
-   диакритика, ё/е, регистр, CJK сортируются неверно).
-10. **Unicode, кодировки, нормализация.** UTF-8 везде; корректная обработка
-    emoji и составных графем (подсчёт длины по code points/графемам, а не по
-    UTF-16 code units — обрезка строки не рвёт суррогатную пару/эмодзи);
-    нормализация (NFC/NFD) при сравнении/поиске/хранении; ввод в неродных
-    раскладках (диакритика, IME для CJK) не ломает валидацию.
-11. **Интерполяция переменных в переводах.** Переменные вставляются как
-    именованные плейсхолдеры внутри переводимой строки (`t('greeting', {name})`
-    → «Привет, {name}!»), чтобы переводчик мог менять порядок слов; НЕ склеивание
-    фрагментов (`t('greeting') + name + t('suffix')`). Плейсхолдеры присутствуют
-    во всех локалях и не потеряны в переводе; форматирование числа/даты внутри
-    сообщения тоже локале-aware (ICU `{n, number}`/`{d, date}`).
-12. **Локаль-зависимые ассеты и знаки.** Изображения/иконки с зашитым текстом
-    (нужны локализованные версии или текст поверх); флаг ≠ язык (не использовать
-    флаг страны как переключатель языка); символы, жесты, цвета с культурной
-    коннотацией; примеры данных (имена, телефоны, адреса, форматы) в UI по
-    региону.
-13. **Выбор и персистентность локали.** Локаль определяется корректно
-    (`Accept-Language`/настройка пользователя/URL), сохраняется между сессиями,
-    переключается без перезагрузки данных в неверном языке; SSR/мета-теги
-    (`<html lang>`, hreflang) согласованы с выбранной локалью; сервер и клиент
-    не расходятся в локали (гидрация).
+1. **Hardcoded user-facing strings.** Any text visible to the user must go through
+   an i18n function/resource, not be a literal in the code. Look for: string
+   literals in JSX/templates, `alt`/`title`/`placeholder`/`aria-label` with text,
+   text in `throw new Error(...)` shown to the user, text in validators, `enum`
+   values rendered as-is, strings in toasts/alerts. Exceptions (technical logs, API
+   keys) — flag them but do not count them as findings.
+2. **Translation completeness and integrity.** All keys are present in all target
+   locales; no raw keys have "leaked" into the UI (`user.profile.title` instead of
+   text); a fallback to the default language is deliberate and does not mask a
+   missing key; no empty values; no duplicate keys with diverging meaning.
+3. **Text length and UI overflow.** Fixed width/height on text containers,
+   `text-overflow: ellipsis` where clipping loses meaning, absence of wrapping
+   (`white-space: nowrap`) on translatable elements; buttons/badges/tabs sized for
+   short English. Check on a long language (de/fi ~+35%).
+4. **RTL (right-to-left).** `dir="rtl"` is set by locale; logical CSS properties
+   are used (`margin-inline-start` instead of `margin-left`, `padding-inline`,
+   `inset-inline`) instead of physical ones; directional icons ("back/forward"
+   arrows, progress) are mirrored; the layout is not broken on flex/grid; the order
+   of paired elements is correct.
+5. **Pluralization.** Not concatenation `count + " item(s)"` and not a naive ternary
+   `count === 1 ? 'item' : 'items'` — the target language's plural rules are used
+   (ICU `plural`, i18next `_plural`/count, gettext `ngettext`). Account for the fact
+   that Russian/Polish/Arabic have more than two forms (one/few/many/other), while
+   Japanese has one. Check the zero form where it is special.
+6. **Date and time formatting.** Not a hardcoded format (`DD.MM.YYYY`,
+   `MM/DD/YYYY`) — `Intl.DateTimeFormat`/a locale-aware library with the locale
+   passed in is used; the 12/24-hour format, the first day of the week, and
+   month/day names come from the locale.
+7. **Number, currency, unit formatting.** Thousands/decimal separators by locale
+   (1,234.56 vs 1 234,56 vs 1.234,56), `Intl.NumberFormat`; currency is formatted
+   with the correct symbol/position/code (`Intl.NumberFormat(..., {style:
+   'currency', currency})`) rather than by gluing on a `$`; units of measure and
+   systems (metric/imperial) by region.
+8. **Time zones.** Time is stored in UTC and displayed in the user's time zone; no
+   `new Date(string)` without a zone giving an offset; daylight saving time is
+   accounted for; "today/yesterday" is computed in the user's time zone, not the
+   server's.
+9. **Sorting and collation.** Lists are sorted with locale awareness
+   (`Intl.Collator`/`localeCompare(locale)`), not by character codes (otherwise
+   diacritics, ё/е, case, CJK sort incorrectly).
+10. **Unicode, encodings, normalization.** UTF-8 everywhere; correct handling of
+    emoji and composite graphemes (length counted by code points/graphemes, not by
+    UTF-16 code units — string truncation does not tear a surrogate pair/emoji);
+    normalization (NFC/NFD) on comparison/search/storage; input in non-native
+    layouts (diacritics, IME for CJK) does not break validation.
+11. **Variable interpolation in translations.** Variables are inserted as named
+    placeholders inside the translatable string (`t('greeting', {name})` →
+    "Hello, {name}!"), so the translator can change word order; NOT by gluing
+    fragments (`t('greeting') + name + t('suffix')`). Placeholders are present in
+    all locales and not lost in translation; number/date formatting inside the
+    message is also locale-aware (ICU `{n, number}`/`{d, date}`).
+12. **Locale-dependent assets and signs.** Images/icons with baked-in text
+    (localized versions or overlaid text needed); a flag ≠ a language (do not use a
+    country flag as a language switcher); symbols, gestures, colors with cultural
+    connotations; sample data (names, phones, addresses, formats) in the UI by
+    region.
+13. **Locale selection and persistence.** The locale is detected correctly
+    (`Accept-Language`/user setting/URL), persists across sessions, switches without
+    reloading data in the wrong language; SSR/meta tags (`<html lang>`, hreflang)
+    are consistent with the chosen locale; the server and client do not diverge in
+    locale (hydration).
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ
-- Строки внутри сообщений об ошибках/валидации и в тостах — их часто забывают
-  вынести в словарь.
-- Конкатенация «{count} {unit}» или «Showing X of Y» кусками — ломает порядок
-  слов и плюрализацию одновременно.
-- Псевдо-перевод отсутствует, поэтому переполнение находят только после релиза
-  на немецком.
-- `toLocaleDateString()` без явного аргумента локали — «работает» на машине
-  разработчика, даёт другой формат в проде.
-- Ключ добавили только в дефолтную локаль, остальные молча показывают английский
-  (или сырой ключ) — выглядит как «переведено».
-- RTL: логотип/иконка «назад» не зеркалированы; выпадашка открывается за край
-  экрана; `text-align: left` захардкожен.
-- Обрезка строки по `.substring(0, n)` рвёт эмодзи/суррогатную пару → битый
-  символ.
-- Множественное число проверено на английском (2 формы) и падает на русском
-  (5 файлов → «5 файла»/«5 файлов»).
-- Валюта форматируется как `"$" + amount` — неверно для евро/локалей, где символ
-  после суммы, и для валют без дробной части (JPY).
-- Сортировка выпадающего списка стран/имён по ASCII — диакритика уезжает в конец.
-- Дата «вчера/сегодня» считается по UTC → у пользователя в UTC-8 показывает не
-  тот день.
-- Жёстко зашитый `lang="en"` в `<html>` при переключённой локали — ломает
-  скринридеры и переносы.
-- Числовой ввод: пользователь вводит `1.234,56` (европейский формат), парсер
-  ждёт `1234.56` → неверное значение.
-- Длина поля/лимит символов задан под латиницу — для CJK один «символ» несёт
-  больше смысла, лимит становится слишком жёстким.
+## EDGE CASES THAT ARE OFTEN MISSED
+- Strings inside error/validation messages and in toasts — they are often forgotten
+  when extracting to the dictionary.
+- Concatenating "{count} {unit}" or "Showing X of Y" from pieces — breaks word
+  order and pluralization at the same time.
+- Pseudo-translation is absent, so overflow is only found after the release in
+  German.
+- `toLocaleDateString()` without an explicit locale argument — "works" on the
+  developer's machine, gives a different format in prod.
+- A key was added only to the default locale, the others silently show English
+  (or the raw key) — it looks like "translated".
+- RTL: the logo / "back" icon is not mirrored; a dropdown opens off the edge of the
+  screen; `text-align: left` is hardcoded.
+- Truncating a string with `.substring(0, n)` tears an emoji/surrogate pair → a
+  broken character.
+- Pluralization was checked in English (2 forms) and fails in Russian
+  (5 files → "5 файла"/"5 файлов").
+- Currency formatted as `"$" + amount` — wrong for the euro / locales where the
+  symbol comes after the amount, and for currencies with no fractional part (JPY).
+- Sorting a dropdown of countries/names by ASCII — diacritics drift to the end.
+- A "yesterday/today" date computed in UTC → for a user in UTC-8 it shows the wrong
+  day.
+- A hardcoded `lang="en"` in `<html>` while the locale is switched — breaks screen
+  readers and hyphenation.
+- Numeric input: the user enters `1.234,56` (European format), the parser expects
+  `1234.56` → an incorrect value.
+- A field length/character limit set for Latin — for CJK a single "character"
+  carries more meaning, and the limit becomes too strict.
 
-## ШКАЛА SEVERITY
-Для каждой находки указывай, какая локаль/язык ломает и что именно.
-- **Critical** — на целевой локали функциональность неработоспособна или данные
-  искажаются (неверный парсинг числа/валюты → неверная сумма; сырые ключи вместо
-  текста на всём экране; RTL полностью ломает навигацию).
-- **High** — заметная поломка UX на целевой локали: обрезанный/наезжающий текст
-  на ключевых элементах, неверный формат даты/валюты на важных данных,
-  неправильная плюрализация в основном сценарии, крупные пропуски перевода.
-- **Medium** — локальная проблема: часть строк захардкожена, неоптимальная
-  сортировка, отсутствие поддержки одной из второстепенных локалей, мелкое
-  переполнение.
-- **Low** — best practice без прямого сценария поломки на текущих целевых
-  локалях (физические CSS-свойства при отсутствии планов на RTL, отсутствие
-  псевдолокали).
+## SEVERITY SCALE
+For each finding, state which locale/language breaks and exactly what.
+- **Critical** — on the target locale the functionality is inoperable or data is
+  corrupted (incorrect number/currency parsing → a wrong amount; raw keys instead
+  of text across the whole screen; RTL completely breaks navigation).
+- **High** — a noticeable UX breakage on the target locale: clipped/overlapping
+  text on key elements, a wrong date/currency format on important data, incorrect
+  pluralization in the main scenario, large translation gaps.
+- **Medium** — a local problem: some strings are hardcoded, suboptimal sorting,
+  lack of support for one of the secondary locales, minor overflow.
+- **Low** — best practice with no direct breakage scenario on the current target
+  locales (physical CSS properties with no RTL plans, absence of a pseudo-locale).
 
-Вердикт: готово к локализации на целевые языки / готово с оговорками / не готово
-(перечисли блокеры и на каких языках).
+Verdict: ready for localization into the target languages / ready with caveats /
+not ready (list the blockers and in which languages).
 
-## ФОРМАТ ОТЧЁТА
-1. **Executive summary** (без жаргона): заработает ли продукт на целевых языках/
-   регионах, что сломается и на каком языке, что чинить первым, есть ли риск
-   искажения данных (деньги/даты).
-2. **SCOPE** — проверенные файлы/ресурсы/локали и что осталось за периметром.
-3. **Вердикт одной фразой** в начале.
-4. **Матрица покрытия** — какие локали проверены вживую, какие только по коду,
-   что проверил линтер.
-5. **Список находок**: ID, file:line, категория, конкретная ломающая
-   локаль/язык, сценарий, severity, рекомендация.
-6. **Что сделано хорошо** — сильные i18n-паттерны для тиражирования.
-7. **План действий**: блокеры vs. отложенное.
-8. **Что не проверено** — ограничения (не все локали в сборке, нет реальных
-   переводов для проверки длины, не тестировался RTL вживую и т.п.).
+## REPORT FORMAT
+1. **Executive summary** (no jargon): will the product work in the target
+   languages/regions, what will break and in which language, what to fix first, is
+   there a risk of data corruption (money/dates).
+2. **SCOPE** — the files/resources/locales checked and what was left out of scope.
+3. **One-line verdict** up front.
+4. **Coverage matrix** — which locales were checked live, which only from the code,
+   what the linter checked.
+5. **List of findings**: ID, file:line, category, the specific breaking
+   locale/language, scenario, severity, recommendation.
+6. **What was done well** — strong i18n patterns worth replicating.
+7. **Action plan**: blockers vs. deferred.
+8. **What was not checked** — limitations (not all locales in the build, no real
+   translations to check length, RTL was not tested live, etc.).
 
-## ПРАВИЛА ОФОРМЛЕНИЯ НАХОДОК
-Перед началом проверь, нет ли отчёта по этому периметру в `docs/qa/i18n/` — если
-есть, продолжи нумерацию ID и обнови статусы, а не пересоздавай.
-Для каждой находки:
-- Стабильный ID: `I18N-<scope-slug>-001`.
-- file:line (и/или URL + элемент).
-- Категория (номер блока чек-листа / тип: хардкод, плюрализация, RTL, формат…).
-- Конкретная ломающая локаль/язык и сценарий: «на de-DE текст кнопки
-  "Speichern und fortfahren" обрезается в контейнере 120px» — не абстрактно.
-- Severity с обоснованием (что ломается / искажаются ли данные).
-- Конкретная рекомендация («вынести строку в ресурс `common.save`»,
-  «заменить конкатенацию на ICU-plural», «использовать `Intl.NumberFormat` с
-  передачей локали и currency»).
-Сохрани отчёт в `docs/qa/i18n/<scope-slug>.md` (следуй существующей структуре
-репозитория; `docs/qa/...` — дефолт).
+## RULES FOR WRITING UP FINDINGS
+Before you start, check whether a report for this scope exists in `docs/qa/i18n/` —
+if so, continue the ID numbering and update statuses rather than recreating it.
+For each finding:
+- A stable ID: `I18N-<scope-slug>-001`.
+- file:line (and/or URL + element).
+- Category (the checklist block number / type: hardcoding, pluralization, RTL,
+  format…).
+- The specific breaking locale/language and scenario: "on de-DE the button text
+  "Speichern und fortfahren" is clipped in the 120px container" — not in the
+  abstract.
+- Severity with justification (what breaks / whether data is corrupted).
+- A concrete recommendation ("extract the string into resource `common.save`",
+  "replace the concatenation with an ICU plural", "use `Intl.NumberFormat` with the
+  locale and currency passed in").
+Save the report to `docs/qa/i18n/<scope-slug>.md` (follow the existing repository
+structure; `docs/qa/...` is the default).
 
-## ЗАПУСК (практическая инструкция)
-1. САМ в основном потоке определи SCOPE (раздел «Входные данные») и целевые
-   локали — не делегируй, субагент не видит контекст диалога. Определи
-   i18n-механизм проекта, расположение ресурсов, как поднять приложение.
-2. Проверь, нет ли предыдущего отчёта в `docs/qa/i18n/`.
-3. Прогони СРЕЗ 1 (линтер/экстрактор, diff ключей между локалями, grep на
-   хардкод).
-4. Проведи СРЕЗ 2 (построчный разбор по чек-листу) и СРЕЗ 3 (живой прогон на
-   длинном/RTL/CJK-языке в браузере — обязателен для визуальных категорий 3,4).
-   Если объём большой и доступен Agent tool — раздели зоны/языки между
-   субагентами; каждому передай конкретные пути/ресурсы, чек-лист, шкалу
-   severity, формат находки (субагент не видит этот файл). Пиши подтверждённые
-   находки в промежуточный файл по мере разбора.
-5. Сведи три среза в отчёт, отсей false positive, сохрани в
+## RUNNING IT (practical instructions)
+1. Determine the SCOPE YOURSELF in the main thread (see "Input") and the target
+   locales — do not delegate; a subagent does not see the conversation context.
+   Determine the project's i18n mechanism, where the resources are, and how to bring
+   up the app.
+2. Check whether a previous report exists in `docs/qa/i18n/`.
+3. Run PASS 1 (linter/extractor, key diff across locales, grep for hardcoding).
+4. Carry out PASS 2 (line-by-line review against the checklist) and PASS 3 (live run
+   on a long/RTL/CJK language in the browser — mandatory for the visual categories
+   3, 4). If the scope is large and the Agent tool is available — split zones/
+   languages across subagents; give each one the concrete paths/resources, the
+   checklist, the severity scale, and the finding format (the subagent does not see
+   this file). Write confirmed findings into an interim file as you go.
+5. Merge the three passes into the report, filter out false positives, save to
    `docs/qa/i18n/<scope-slug>.md`.
-6. Явно перечисли, что не проверено.
+6. Explicitly list what was not checked.
 
-Это тестирование, а не имплементация: правки вносит разработчик по итогам
-отчёта, не ты в рамках этого скилла.
+This is testing, not implementation: fixes are made by the developer based on the
+report, not by you within this skill.
+

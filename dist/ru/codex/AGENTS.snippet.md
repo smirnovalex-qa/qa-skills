@@ -1,4 +1,4 @@
-<!-- qa-skills: сгенерировано, не редактировать вручную. Источник — plugins/qa-skills/skills/*/SKILL.md -->
+<!-- qa-skills: сгенерировано — не редактировать вручную. Источник: skills-src/*/ru/SKILL.md -->
 ## QA-скиллы (Codex prompts)
 
 В `~/.codex/prompts/` установлен набор QA-воркфлоу. Codex не подхватывает их

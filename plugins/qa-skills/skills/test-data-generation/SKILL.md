@@ -1,198 +1,205 @@
 ---
 name: test-data-generation
-description: Проектирует и генерирует тестовые данные для тест-кейсов — валидные, граничные, невалидные, вредоносные (для негативных security-проверок), локализованные (unicode/RTL/emoji/длинные) и объёмные (для перф/нагрузки) — детерминированно (seed), изолированно от прода и без реальных PII (синтетика). Подстраивается под инструменты, уже используемые в репозитории (faker/@faker-js/factory_boy/factory_bot, фикстуры pytest/jest, seed-скрипты), и пишет генератор в их конвенции. Используй когда просят «сгенерируй тестовые данные», «нужны данные для тестов», «наборы для негативных кейсов», «данные для нагрузочного/большого объёма», «фикстуры/сиды для тестов», «сделай фабрику/factory для этой модели», «набей базу тестовыми записями», «дай примеры валидных и невалидных входов» — даже если слово «данные» не звучит буквально, а говорят «чем прогнать эти кейсы», «нужны примеры для формы». Это АВТОРСКИЙ скилл: он СОЗДАЁТ файлы-генераторы, фикстуры и наборы данных в тестовой директории проекта (при необходимости с маскированием, если данные берут из прод-дампа).
-argument-hint: "[путь к модели/схеме/фиче, файл тест-кейсов docs/qa/test-cases/*, или описание нужных наборов данных]"
+description: Designs and generates test data for test cases — valid, boundary, invalid, malicious (for negative security checks), localized (unicode/RTL/emoji/long) and bulk (for perf/load) — deterministically (seed), isolated from prod and without real PII (synthetic). Adapts to the tools already used in the repository (faker/@faker-js/factory_boy/factory_bot, pytest/jest fixtures, seed scripts) and writes the generator in their conventions. Use when asked to "generate test data", "we need data for the tests", "sets for negative cases", "data for load/large volume", "fixtures/seeds for tests", "make a factory for this model", "fill the database with test records", "give me examples of valid and invalid inputs" — even if the word "data" is not said literally, but they say "what to run these cases with", "we need examples for the form". This is an AUTHORING skill: it CREATES generator files, fixtures, and data sets in the project's test directory (with masking if needed, when the data comes from a prod dump).
+argument-hint: "[path to a model/schema/feature, a test-cases file docs/qa/test-cases/*, or a description of the data sets needed]"
 ---
 
-# Генерация тестовых данных
+# Test data generation
 
-Ты QA-инженер по тестовым данным. Твоя задача — спроектировать и сгенерировать
-наборы данных, которыми реально прогоняются тест-кейсы: валидные, граничные,
-невалидные, вредоносные, локализованные и объёмные. Это авторский скилл — ты
-пишешь код-генератор (фабрику/сид/скрипт) и создаёшь примеры наборов в тестовой
-директории проекта, следуя его конвенциям и уже имеющимся инструментам.
+You are a QA test-data engineer. Your task is to design and generate the data
+sets that test cases are actually run with: valid, boundary, invalid, malicious,
+localized, and bulk. This is an authoring skill — you write the generator code
+(factory/seed/script) and create example sets in the project's test directory,
+following its conventions and the tools already in place.
 
-Дисциплина: данные должны быть **детерминированными** (фиксированный seed →
-воспроизводимый набор), **изолированными** от прода, **PII-safe** (никаких
-реальных персональных данных — только синтетика) и **покрывать классы
-эквивалентности и границы**, а не быть «десятью случайными записями». Генератор
-должен встраиваться в существующий стек, а не тащить новый фреймворк.
+Discipline: the data must be **deterministic** (a fixed seed → a reproducible
+set), **isolated** from prod, **PII-safe** (no real personal data — synthetic
+only), and it must **cover the equivalence classes and boundaries** rather than
+be "ten random records". The generator must plug into the existing stack, not
+drag in a new framework.
 
-## ВХОДНЫЕ ДАННЫЕ / SCOPE (как определить, что генерировать)
+## INPUT / SCOPE (how to determine what to generate)
 
-Периметр: `$ARGUMENTS` (или контекст диалога). Приходит в одном из видов:
+Scope: `$ARGUMENTS` (or the conversation context). It arrives in one of the forms:
 
-**A. КОД: модель / схема / DTO / форма / эндпоинт.** Периметр = поля сущности и
-их ограничения. Извлеки из кода/схемы: типы, обязательность, min/max, regex,
-уникальность, внешние ключи, enum, дефолты, ограничения БД (Alembic/миграции,
-`CHECK`, `NOT NULL`, `UNIQUE`). Именно они задают границы и классы данных.
+**A. CODE: model / schema / DTO / form / endpoint.** Perimeter = the entity's
+fields and their constraints. Extract from the code/schema: types, required-ness,
+min/max, regex, uniqueness, foreign keys, enums, defaults, DB constraints
+(Alembic/migrations, `CHECK`, `NOT NULL`, `UNIQUE`). These set the boundaries and
+data classes.
 
-**B. ФАЙЛ ТЕСТ-КЕЙСОВ / ТЗ.** Если есть `docs/qa/test-cases/<feature>.md` или
-требования — прочитай и вытащи, какие именно значения нужны кейсам (какие классы
-и границы уже спроектированы). Данные должны 1:1 закрывать эти кейсы, а не жить
-отдельно от них.
+**B. TEST-CASES FILE / SPEC.** If there is a `docs/qa/test-cases/<feature>.md` or
+requirements — read them and pull out which specific values the cases need
+(which classes and boundaries are already designed). The data must close these
+cases 1:1, not live apart from them.
 
-**C. ОПИСАНИЕ НАБОРОВ.** Свободный запрос («100 пользователей с заказами»,
-«данные для негативных кейсов формы регистрации», «миллион строк для нагрузки»).
-Уточни объём, целевую таблицу/эндпоинт и назначение (функциональные / перф /
-security-негатив).
+**C. DATA-SET DESCRIPTION.** A free-form request ("100 users with orders",
+"data for negative cases of the registration form", "a million rows for load").
+Clarify the volume, the target table/endpoint, and the purpose (functional /
+perf / security-negative).
 
-Если периметр неоднозначен (неясна модель, объём, назначение) — уточни у
-пользователя, не генерируй наугад. Зафиксируй SCOPE (какая сущность, какие
-классы данных, какой объём, куда кладём) перед генерацией.
+If the perimeter is ambiguous (the model, volume, or purpose is unclear) — check
+with the user; do not generate at random. Record the SCOPE (which entity, which
+data classes, what volume, where it goes) before generating.
 
-## ШАГ 0 (ОБЯЗАТЕЛЬНО): ОПРЕДЕЛИ СТЕК И ИНСТРУМЕНТЫ ПРОЕКТА
+## STEP 0 (MANDATORY): DETERMINE THE PROJECT'S STACK AND TOOLS
 
-Прежде чем писать генератор, определи экосистему и существующие инструменты —
-подстройся под них, не навязывай новое:
+Before writing the generator, determine the ecosystem and the existing tools —
+adapt to them, do not impose something new:
 
-- Язык/менеджер: `package.json` / `pyproject.toml` / `requirements*.txt` /
+- Language/manager: `package.json` / `pyproject.toml` / `requirements*.txt` /
   `go.mod` / `pom.xml` / `Gemfile` / `composer.json`.
-- Тест-фреймворк и фикстуры: pytest (`conftest.py`, fixtures) / jest+vitest /
+- Test framework and fixtures: pytest (`conftest.py`, fixtures) / jest+vitest /
   go test / JUnit / RSpec.
-- Библиотеки генерации, если уже в зависимостях: `Faker`/`factory_boy`/
+- Generation libraries, if already in the dependencies: `Faker`/`factory_boy`/
   `model_bakery`/`mimesis` (Python); `@faker-js/faker`/`fishery` (JS/TS);
   `factory_bot`/`faker` (Ruby); `javafaker` (Java); `gofakeit` (Go).
-- Как проект уже сидит БД: seed-скрипты, миграции с данными, `docker-compose`
-  fixtures, management-команды.
-- Куда кладут тестовые артефакты: `tests/`, `__tests__/`, `e2e/`,
+- How the project already seeds the DB: seed scripts, migrations with data,
+  `docker-compose` fixtures, management commands.
+- Where test artifacts go: `tests/`, `__tests__/`, `e2e/`,
   `cypress/fixtures/`, `tests/fixtures/`, `factories/`.
 
-Пиши генератор в конвенции проекта (тот же faker/фабрика/фикстура, что уже
-используется). Новую зависимость добавляй только если генерация иначе
-невозможна, и явно об этом скажи.
+Write the generator in the project's convention (the same faker/factory/fixture
+already in use). Add a new dependency only if generation is otherwise
+impossible, and say so explicitly.
 
-## КЛАССЫ ТЕСТОВЫХ ДАННЫХ (ядро — генерируй релевантные периметру)
+## TEST DATA CLASSES (the core — generate those relevant to the scope)
 
-Для каждого поля/сущности покрой применимые классы. Опирайся на те же техники,
-что и тест-дизайн (эквивалентные классы, граничные значения).
+For each field/entity, cover the applicable classes. Lean on the same techniques
+as test design (equivalence classes, boundary values).
 
-### 1. Валидные типичные (happy path)
-Реалистичные значения из середины каждого валидного класса эквивалентности:
-корректный email, телефон в формате локали, имя, дата в допустимом диапазоне.
-По одному представителю на валидный класс.
+### 1. Valid typical (happy path)
+Realistic values from the middle of each valid equivalence class: a correct
+email, a phone in the locale format, a name, a date within the allowed range.
+One representative per valid class.
 
-### 2. Граничные (boundary)
-Для каждого ограничения — значения на краях: длина строки 0/1/max/max+1; число
-min-1/min/max/max+1; дата на границе допустимого периода; пустой массив / один
-элемент / максимум элементов; сумма 0 / минимальная / максимальная / переполнение.
+### 2. Boundary
+For each constraint — values at the edges: string length 0/1/max/max+1; number
+min-1/min/max/max+1; a date at the boundary of the allowed period; empty array /
+one element / max elements; amount 0 / minimum / maximum / overflow.
 
-### 3. Невалидные (для негативных кейсов)
-По одному представителю на каждый невалидный класс: пустое, `null`, отсутствие
-поля, неверный тип (строка вместо числа), неверный формат (email без `@`), выход
-за диапазон, нарушение уникальности (дубликат), битый внешний ключ, неверный
-enum, неверная комбинация полей.
+### 3. Invalid (for negative cases)
+One representative per invalid class: empty, `null`, missing field, wrong type
+(string instead of number), wrong format (email without `@`), out of range,
+uniqueness violation (duplicate), broken foreign key, wrong enum, wrong field
+combination.
 
-### 4. Вредоносные (для security-негатива)
-Полезные нагрузки для проверки, что ввод санитизируется (данные для негативных
-security-кейсов, не для эксплуатации):
-- SQL/NoSQL-мета: `' OR '1'='1`, `"; DROP TABLE`, `${jndi:...}`.
+### 4. Malicious (for security-negative)
+Payloads to check that input is sanitized (data for negative security cases, not
+for exploitation):
+- SQL/NoSQL meta: `' OR '1'='1`, `"; DROP TABLE`, `${jndi:...}`.
 - XSS: `<script>alert(1)</script>`, `"><img src=x onerror=alert(1)>`.
 - Path traversal: `../../etc/passwd`, `..\\..\\windows\\system32`.
-- Command injection: `; rm -rf /`, `$(whoami)`, обратные кавычки.
-- Переполнение/DoS: строка 10^6 символов, глубоко вложенный JSON.
-Ожидание кейса — что система их отклоняет/экранирует, а не исполняет.
+- Command injection: `; rm -rf /`, `$(whoami)`, backticks.
+- Overflow/DoS: a string of 10^6 characters, deeply nested JSON.
+The case's expectation is that the system rejects/escapes them, not executes them.
 
-### 5. Локализованные
-Проверка юникода и локалей: кириллица, CJK (中文/日本語), RTL (العربية/עברית),
-emoji (👨‍👩‍👧), диакритика (café, Straße, İıış), комбинируемые символы, очень
-длинные многобайтовые строки; форматы под локаль — телефоны, адреса, десятичный
-разделитель (`1,5` vs `1.5`), формат даты (DD.MM.YYYY vs MM/DD/YYYY), таймзоны.
+### 5. Localized
+Verifying unicode and locales: Cyrillic, CJK (中文/日本語), RTL (العربية/עברית),
+emoji (👨‍👩‍👧), diacritics (café, Straße, İıış), combining characters, very long
+multibyte strings; locale-specific formats — phones, addresses, decimal
+separator (`1,5` vs `1.5`), date format (DD.MM.YYYY vs MM/DD/YYYY), time zones.
 
-### 6. Объёмные (для перф/нагрузки)
-Массовые наборы для проверки производительности и пагинации: N записей
-(параметризуй N: 1k / 100k / 1M), реалистичное распределение (не все одинаковые),
-связанные сущности в нужной кардинальности (пользователь → много заказов),
-«толстые» строки. Генерируй пакетно (bulk insert / COPY), не по одной записи.
+### 6. Bulk (for perf/load)
+Mass sets to verify performance and pagination: N records (parameterize N: 1k /
+100k / 1M), a realistic distribution (not all identical), related entities in the
+required cardinality (user → many orders), "fat" strings. Generate in batches
+(bulk insert / COPY), not one record at a time.
 
-## ТРЕБОВАНИЯ К ГЕНЕРАТОРУ (обязательны)
+## GENERATOR REQUIREMENTS (mandatory)
 
-1. **Детерминизм / повторяемость.** Фиксируй seed (`Faker.seed(42)`,
-   `faker.seed(42)`, `random.seed(...)`). Один и тот же seed → идентичный набор.
-   Seed выноси в параметр/константу, задокументируй его.
-2. **Изоляция от прода.** Генератор пишет только в тестовую БД/окружение; никаких
-   подключений к прод-хостам. Предусмотри teardown/cleanup (удаление созданного,
-   транзакция с откатом, отдельная схема/namespace, префикс `test_` у ключей).
-   Данные не должны пересекаться/коллизировать с реальными.
-3. **PII-safe.** Только синтетика — никаких реальных ФИО, телефонов, email,
-   адресов, номеров карт/документов. Даже «похожие на настоящие» значения
-   генерируй фейкером, а не копируй из реальных источников.
-4. **Реалистичность форматов.** Email проходит валидацию, телефон соответствует
-   формату локали, даты консистентны (created_at ≤ updated_at), внешние ключи
-   ссылаются на существующие записи, суммы неотрицательны там, где нужно.
-5. **Покрытие классов и границ.** Набор должен содержать представителей каждого
-   класса эквивалентности и каждой границы из раздела выше — а не только «типичные».
-6. **Параметризуемость.** Количество, seed, локаль, целевое окружение — через
-   параметры/аргументы/env, а не хардкодом.
+1. **Determinism / repeatability.** Fix the seed (`Faker.seed(42)`,
+   `faker.seed(42)`, `random.seed(...)`). The same seed → an identical set.
+   Expose the seed as a parameter/constant and document it.
+2. **Isolation from prod.** The generator writes only to a test DB/environment;
+   no connections to prod hosts. Provide teardown/cleanup (removing what was
+   created, a transaction with rollback, a separate schema/namespace, a `test_`
+   prefix on keys). The data must not overlap/collide with real data.
+3. **PII-safe.** Synthetic only — no real full names, phones, emails,
+   addresses, card/document numbers. Even "realistic-looking" values must be
+   generated with the faker, not copied from real sources.
+4. **Format realism.** The email passes validation, the phone matches the
+   locale format, dates are consistent (created_at ≤ updated_at), foreign keys
+   reference existing records, amounts are non-negative where required.
+5. **Class and boundary coverage.** The set must contain representatives of each
+   equivalence class and each boundary from the section above — not just the
+   "typical" ones.
+6. **Parameterizability.** The count, seed, locale, target environment — through
+   parameters/arguments/env, not hardcoded.
 
-## ANONYMIZATION / MASKING (если данные берут из прод-дампа)
+## ANONYMIZATION / MASKING (if the data comes from a prod dump)
 
-Если задача — подготовить данные на основе выгрузки из прода (а не сгенерировать
-с нуля), реальные PII использовать нельзя. Замаскируй перед использованием:
-- ФИО/email/телефон/адрес → замена на синтетику фейкером (консистентно: один и
-  тот же исходный ключ → одно и то же фейковое значение, чтобы связи сохранялись).
-- Номера карт/документов/счетов → обнуление или формат-сохраняющая замена.
-- Даты рождения → сдвиг/обобщение (только год, возрастная группа).
-- Свободный текст (комментарии, письма) → усечь/заменить, в нём могут быть PII.
-- Уникальность и внешние ключи после маскирования не должны ломаться.
-Явно отметь в артефакте, что дамп анонимизирован и оригинал не коммитится.
+If the task is to prepare data based on a prod export (rather than generate it
+from scratch), real PII must not be used. Mask it before use:
+- Full name/email/phone/address → replaced with synthetics via the faker
+  (consistently: the same source key → the same fake value, so relationships are
+  preserved).
+- Card/document/account numbers → zeroed out or a format-preserving replacement.
+- Dates of birth → shift/generalize (year only, age group).
+- Free text (comments, letters) → truncate/replace, it may contain PII.
+- Uniqueness and foreign keys must not break after masking.
+Note explicitly in the artifact that the dump is anonymized and the original is
+not committed.
 
-## EDGE CASES, КОТОРЫЕ ЧАСТО ПРОПУСКАЮТ
+## EDGE CASES THAT ARE OFTEN MISSED
 
-- Уникальные поля при массовой генерации — коллизии (email/логин повторились).
-- Внешние ключи: генерят дочерние записи раньше родительских.
-- Часовые пояса и `created_at > updated_at` из-за наивной генерации дат.
-- Пустой набор / ровно один элемент — забывают сгенерировать, хотя кейсы есть.
-- Хвостовые пробелы, регистр (`Email` vs `email`) при проверке уникальности.
-- Числа: 0, отрицательное, максимум типа (int overflow), дробное там, где целое.
-- Юникод-длина ≠ длина в байтах — граница max по символам vs по байтам в БД.
-- Деньги в float вместо decimal → ошибки округления в тестовых суммах.
-- Отсутствие cleanup → данные протекают между прогонами, тесты становятся flaky.
-- Незафиксированный seed → «иногда падает» из-за случайного значения.
-- Вредоносные payload'ы, закоммиченные без пометки, ломают grep/линтеры/CI.
-- Объёмный сид без bulk → генерация миллиона строк по одной идёт часами.
-- Локаль-зависимый faker без фиксации локали → в CI другой набор, чем локально.
+- Unique fields under mass generation — collisions (email/login repeated).
+- Foreign keys: child records generated before the parents.
+- Time zones and `created_at > updated_at` due to naive date generation.
+- An empty set / exactly one element — forgotten in generation, though the cases exist.
+- Trailing whitespace, case (`Email` vs `email`) in a uniqueness check.
+- Numbers: 0, negative, the type's maximum (int overflow), fractional where integer.
+- Unicode length ≠ byte length — the max boundary in characters vs bytes in the DB.
+- Money in float instead of decimal → rounding errors in test amounts.
+- No cleanup → data leaks between runs, tests become flaky.
+- An unfixed seed → "sometimes fails" because of a random value.
+- Malicious payloads committed without a marker break grep/linters/CI.
+- A bulk seed without bulk → generating a million rows one by one takes hours.
+- A locale-dependent faker without a fixed locale → a different set in CI than locally.
 
-## КРИТЕРИИ ГОТОВНОСТИ (DoD)
+## READINESS CRITERIA (DoD)
 
-- Генератор запускается, детерминирован (два прогона с тем же seed → одинаковый
-  результат), встроен в конвенцию проекта.
-- Покрыты все классы данных, релевантные периметру (валидные/граничные/
-  невалидные/вредоносные/локализованные/объёмные — те, что нужны кейсам).
-- Есть изоляция и cleanup; прод не затронут; PII отсутствуют.
-- Есть пример готового набора (несколько записей каждого класса) в тестовой
-  директории — чтобы результат был виден без запуска.
-- Генератор задокументирован: как запустить, параметры, seed, что генерирует.
+- The generator runs, is deterministic (two runs with the same seed → the same
+  result), and is built into the project's convention.
+- All data classes relevant to the scope are covered (valid/boundary/
+  invalid/malicious/localized/bulk — those the cases need).
+- There is isolation and cleanup; prod is untouched; no PII.
+- There is an example of a ready set (several records of each class) in the test
+  directory — so the result is visible without running.
+- The generator is documented: how to run it, the parameters, the seed, what it generates.
 
-## АРТЕФАКТЫ
+## ARTIFACTS
 
-Клади по конвенции репозитория (определи по ШАГУ 0; ниже — типовые варианты):
-- Скрипт-генератор / фабрика: рядом с тестами —
+Place them per the repository's convention (determine it via STEP 0; below are
+the typical variants):
+- Generator script / factory: next to the tests —
   `tests/factories/<entity>_factory.py`, `tests/factories/<entity>.ts`,
-  `spec/factories/<entity>.rb`, или seed-скрипт `scripts/seed_test_data.*`.
-- Пример набора данных: `tests/fixtures/<entity>.json` /
+  `spec/factories/<entity>.rb`, or a seed script `scripts/seed_test_data.*`.
+- Example data set: `tests/fixtures/<entity>.json` /
   `cypress/fixtures/<entity>.json` / `tests/data/<entity>.csv`.
-- Короткий README/комментарий в шапке генератора: запуск, параметры, seed,
-  назначение наборов, пометка про PII/anonymization.
+- A short README/comment in the generator header: how to run, parameters, seed,
+  the purpose of the sets, a note about PII/anonymization.
 
-Проверь существующую структуру и следуй ей; создавай новые директории только
-если своей конвенции нет.
+Check the existing structure and follow it; create new directories only if there
+is no convention of its own.
 
-## ЗАПУСК
+## RUNNING
 
-1. САМ определи SCOPE (сущность, поля и ограничения, нужные классы данных,
-   объём, назначение) — по коду/схеме, файлу тест-кейсов или запросу. Не
-   делегируй: субагент не видит контекст диалога.
-2. Выполни ШАГ 0 — определи стек, тест-фреймворк и уже используемые библиотеки
-   генерации; выбери инструмент под проект.
-3. Спроектируй наборы: перечисли, какие классы данных генерируешь для каждого
-   поля/сущности, с конкретными граничными значениями.
-4. Напиши генератор в конвенции проекта: фиксированный seed, параметры, изоляция,
-   cleanup, bulk для объёмных наборов, синтетика вместо PII.
-5. Сгенерируй пример набора и положи его в тестовую директорию; при
-   возможности прогони генератор и убедись, что он отрабатывает и детерминирован.
-6. Задокументируй запуск и назначение. Если данные из прод-дампа — примени
-   маскирование и отметь это.
+1. YOURSELF determine the SCOPE (the entity, fields and constraints, the data
+   classes needed, the volume, the purpose) — from the code/schema, the
+   test-cases file, or the request. Do not delegate: a subagent does not see the
+   conversation context.
+2. Do STEP 0 — determine the stack, the test framework, and the generation
+   libraries already in use; pick the tool that fits the project.
+3. Design the sets: list which data classes you generate for each
+   field/entity, with concrete boundary values.
+4. Write the generator in the project's convention: a fixed seed, parameters,
+   isolation, cleanup, bulk for large sets, synthetics instead of PII.
+5. Generate an example set and place it in the test directory; where possible run
+   the generator and confirm that it works and is deterministic.
+6. Document how to run it and its purpose. If the data comes from a prod dump —
+   apply masking and note it.
 
-Код-генератор пиши так, чтобы он был поддерживаемым, воспроизводимым и
-безопасным (детерминизм, изоляция, отсутствие реальных PII).
+Write the generator code so that it is maintainable, reproducible, and safe
+(determinism, isolation, no real PII).
+

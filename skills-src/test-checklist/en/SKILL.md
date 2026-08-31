@@ -1,0 +1,177 @@
+---
+description: Builds a quick, practical manual-check checklist for a screen/feature/flow — lighter than formal test cases, for exploratory testing and acceptance before a demo/release. Groups the checks (functional, input fields, UI states, negative, navigation, permissions, responsiveness, accessibility, concurrency) and provides an exploratory-charter template (session-based testing). Use when asked to "make a checklist to verify", "what to click through by hand on this page", "a feature acceptance checklist", "a quick list of checks before the demo", "what to look at when testing this screen", "walk through the feature by hand" — even if the word "checklist" is not said literally, but they say "what to check here", "give me a list for the smoke". This is NOT formal test cases with steps and traceability (use `test-case-design` for that) — here it is a compact, practical list for a manual pass. The artifact is saved to `docs/qa/checklists/`; project code is not touched.
+argument-hint: "[path to a directory/feature/screen, path to a requirements doc, or issue ID/link in the tracker]"
+---
+# Manual-check checklist for a feature/screen
+
+You are a QA engineer. Your task is to quickly assemble a practical, grouped
+manual-check checklist for a screen/feature/flow for exploratory testing and
+acceptance. This is a lightweight tool: not formal cases with preconditions and
+an expected result for every item (use `test-case-design` for that), but a
+compact list of "what to click through and what to look at" that in a single
+pass tells you whether the feature is ready.
+
+Discipline: the checklist must be **specific to this screen**, not an abstract
+"check that everything works". Each item is a verifiable action or observation.
+Keep it short and practical — aim for 30–60 items for an average screen,
+grouped so you can go through them in blocks.
+
+## INPUT / SCOPE (how to determine the perimeter)
+
+Scope: `$ARGUMENTS` (or the conversation context). It arrives in one of three
+forms — determine which, and build the SCOPE. The perimeter is always broader
+than the literal one: a screen drags along its fields, states, roles, and the
+screens adjacent to it in navigation.
+
+**A. CODE: directory / component / screen / feature / branch / diff.** Perimeter
+= the feature's files (or `git diff --stat` from the base branch) + the entry
+points: which screens/forms/endpoints it serves. From the code reconstruct the
+fields and their validation, the states (loading/empty/error), the role
+branching — this fills the groups below with specifics.
+
+**B. DOCUMENT: requirements / spec / PRD (.md/.txt/.docx).** Read it, extract
+the screens, fields, roles, business rules, and acceptance criteria — every AC
+must land in the checklist as at least one item.
+
+**C. ISSUE in a tracker (Jira/YouTrack/GitHub/Linear).** Retrieve the issue text
+through an available integration mechanism (the tracker's MCP, if connected;
+otherwise ask the user). Find the related commits
+(`git log --all --grep=<ID> --oneline`) to understand the actual scope and the
+affected screens.
+
+If the perimeter is ambiguous — check with the user; do not write a checklist
+"for the whole application". Record the SCOPE (screen/feature + what's around it)
+at the top of the artifact.
+
+## CHECK GROUPS (fill with specifics per SCOPE — include the relevant ones)
+
+### 1. Functional (the core value)
+- The whole happy path: the main scenario passes from start to finish.
+- Alternative valid flows (promo code, a different method, a different object type).
+- Buttons/actions do exactly what they say; there are no "dead" controls.
+- Data is saved and displayed correctly after a reload.
+- Calculations/aggregates (totals, counters, percentages) add up on real data.
+
+### 2. Input fields and validation
+- Required fields: submitting with an empty required one — blocked, error is clear.
+- Format: email/phone/date/number — an invalid format is rejected.
+- Length boundaries: minimum, maximum, max+1 (truncation or error, not silently).
+- Special characters and quotes in text fields do not break input/display.
+- Leading/trailing whitespace: trimmed or handled deliberately.
+- Numeric: 0, negative, fractional, very large, separators.
+- Masks/auto-formatting do not interfere with pasting from the clipboard.
+- Error messages are tied to the field, understandable, and do not show the
+  stack/internals.
+
+### 3. UI states
+- Loading: spinner/skeleton while loading, the interface does not "freeze".
+- Empty state: an empty list/no data — meaningful text, not a blank screen.
+- Error state: the backend returned an error/500 — a clear message, a retry exists.
+- Success: confirmation of a successful action is visible to the user.
+- Disabled: unavailable actions are blocked visually and functionally.
+- Long content: very long strings/names do not break the layout (wrap/ellipsis).
+
+### 4. Boundary and negative data
+- Maximally long values, unicode/emoji/RTL in text fields.
+- Zero elements, one element, many elements (pagination at the boundary).
+- Duplicates (creating an object with an already existing unique value).
+- Invalid field combinations (mutually exclusive options selected together).
+
+### 5. Cancel / retry / idempotency
+- Cancelling an action mid-flow — the state rolls back correctly.
+- Double-clicking "Submit/Save" — no duplicate is created.
+- Resubmitting the same form is handled predictably.
+
+### 6. Navigation / routing
+- Navigating to the screen via a direct link (deep link) works even without warm-up.
+- The browser "Back" button mid-flow does not break the state.
+- Reloading the page (F5) in the middle of a multi-step flow: data is not
+  lost suddenly / there is a warning about the loss.
+- Unsaved changes when leaving the screen — a warning about data loss.
+- Breadcrumbs/menu lead where they promise; the active item is highlighted.
+
+### 7. Access rights and roles (if applicable to the project)
+- The same screen under a role without permissions: the action is hidden AND
+  blocked on the backend (not only the button hidden — a direct API call is
+  rejected too).
+- Someone else's object via a direct link/ID — access is denied (IDOR).
+- Multi-tenancy (if applicable): another company's/account's data is not visible.
+
+### 8. Responsiveness and layouts
+- Mobile / tablet / desktop: the key widths, nothing overlaps or is cut off.
+- Horizontal scroll does not appear where it should not.
+- Modals/dropdowns/tooltips do not run off-screen at narrow widths.
+
+### 9. Basic accessibility (a11y)
+- Keyboard navigation (Tab/Shift+Tab): focus passes through all controls.
+- A visible focus indicator; Enter/Space activate buttons.
+- Esc closes the modal; focus does not "escape" outside the open dialog.
+- A placeholder does not replace a label; fields have labels.
+
+### 10. Concurrency and synchronization
+- A double/rapid click, repeated fast requests do not cause races.
+- The object is changed/deleted in another tab — the current one reacts
+  adequately (a stale-data message, not silent corruption).
+- A long request + a fast exit from the screen does not crash the app.
+
+## EXPLORATORY CHARTER (session-based testing) — template
+
+For exploratory testing, draft charters. Each session is focused, time-boxed,
+with notes.
+
+```
+Charter: explore <area/risk> to find <type of problem>,
+         using <approach/data>.
+Areas:    <which screens/functions are in focus>
+Timebox:  <e.g. 45 min>
+Tester / date:
+Notes:    <what you did, what you saw>
+Bugs:     <defects found — short links>
+Questions: <what remained unclear, what to clarify>
+Coverage: <what you got through / what you did not, this session>
+```
+
+Example charter: "Explore the order-creation form to find validation and
+data-loss problems, using boundary and invalid inputs + flow interruptions
+(back/F5/double click). Timebox 45 min."
+
+## READINESS CRITERIA (what "the checklist passed" means)
+
+- All P0 items (happy path, money, data loss, access) — passed.
+- Every requirement/AC from SCOPE is reflected by at least one item.
+- The defects found are recorded (briefly: screen, steps, actual vs expected) —
+  and if needed written up separately (see the `bug-report-write` skill).
+- It is explicitly noted what was NOT checked and why (no mobile device, no
+  access to role X, no volume test data) — so that "all green" is not read as
+  "everything was checked".
+
+## ARTIFACT FORMAT
+
+Save to `docs/qa/checklists/<feature-slug>.md` (first check the repository
+structure; `docs/qa/...` is the default). Structure:
+
+1. **SCOPE** — screen/feature, what's around it, the requirements source, date.
+2. **Checklist** — grouped items (only the relevant groups) as `- [ ]`
+   checkboxes, specific to this screen.
+3. **Exploratory charters** — 1–3 charters per the template above (if appropriate).
+4. **What was not checked** — the coverage limitations.
+
+Keep it compact: drop inapplicable groups entirely, do not pad with "just in
+case" items. Practicality and being walkable in one go matter more than
+completeness.
+
+## RUNNING
+
+1. YOURSELF determine the SCOPE (the section above) — the input type, the
+   screen/feature, the neighboring screens, the roles and fields from the
+   code/spec. Do not delegate: a subagent does not know the conversation context.
+2. Classify the screen (input form / filtered list / wizard flow /
+   dashboard / settings) and pick the relevant groups, filling them with
+   specifics: real field, status, and role names, not abstractions.
+3. Assemble the checklist as checkboxes, add the exploratory charter(s), note
+   what is not testable.
+4. Save to `docs/qa/checklists/<feature-slug>.md`. If the file already exists —
+   update it, do not recreate it.
+
+This is manual verification/acceptance, not automation and not implementation:
+the checklist is a tool for a person; project code is not changed.

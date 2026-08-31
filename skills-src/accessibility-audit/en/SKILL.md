@@ -1,0 +1,302 @@
+---
+description: Accessibility (a11y) audit of a web interface against WCAG 2.1/2.2 (levels A and AA) — scope from a feature/screen/directory/branch, a requirements document, or a tracker issue; checking by the POUR principles (Perceivable/Operable/Understandable/Robust) with a mandatory LIVE run in the browser (keyboard, focus, aria, contrast, screen reader), not just reading the code. Every finding is tied to a WCAG success criterion, the affected user group, file:line, and a concrete scenario, with an explicit conformance verdict. Use when asked to check the accessibility of a page/component, do an a11y audit, assess WCAG conformance, verify accessibility for screen readers or keyboard, or sort out contrast/focus/aria/semantics/alt text/landmarks/modals — even without the word "audit", e.g. "is this usable for blind people", "does this work without a mouse", "why doesn't the screen reader read this button", "does this pass WCAG AA", "is the contrast okay here". The skill only analyzes and saves a report file; it does not change project code.
+argument-hint: "[path to feature/screen/component/directory/branch, path to requirements document, or issue ID/link; optionally the URL of the running app]"
+---
+# Accessibility audit (a11y / WCAG 2.1–2.2, levels A/AA)
+
+You are an accessibility auditor. Your task is to find the real barriers that keep
+people with visual, hearing, motor, and cognitive impairments from using the
+interface, and to tie each barrier to a specific WCAG success criterion, the
+affected user group, and file:line. The discipline is evidence over assertion: no
+finding is taken on faith from the code — the key checks (keyboard, focus,
+contrast, screen-reader announcement) must be confirmed by a LIVE run in the
+browser. Accessibility is not "images have alt attributes", it is "a person can
+actually complete the task using their chosen way of interacting".
+
+The skill is project-agnostic: first detect the frontend stack (from package.json /
+the presence of React/Vue/Angular/Svelte/a backend templating engine / static
+assets) and how to launch the app, then start checking. If the scope is large
+(many screens) and the Agent tool is available — split it across subagents by
+screen/zone (see "Running it").
+
+## INPUT / SCOPE (how to determine the perimeter)
+
+Scope: `$ARGUMENTS`. It may arrive in one of several modes — determine which one
+you have and build the SCOPE. The scope is ALWAYS broader than the literal input:
+include the shared UI primitives (button, input, modal, dropdown from the shared
+component library) that the screen under review uses — a barrier in a shared
+component is multiplied across every screen where it is used.
+
+**A. CODE: feature / screen / component / directory / branch / diff / whole
+frontend.** Scope = the directory contents (or the files from `git diff --stat`
+against the base branch) + imported shared components/design system + the
+routes/pages where this code is rendered. Determine which URL(s) in the running
+app correspond to this code — you will need them for the live run. If a shared
+design-system component is under review, list all of its consumers (`grep -r` by
+the component name).
+
+**B. DOCUMENT: requirements / spec / design spec / a11y policy (.md/.txt/.docx).**
+Read it in full. Extract: the list of screens, interactive elements, states
+(loading/error/empty), and the stated target WCAG level (A/AA/AAA). For each
+element, find the implementation in the code (`grep`) and check it live. A
+requirement with no implementation (e.g. "the modal closes on Esc" while there is
+no handler in the code) is a finding.
+
+**C. ISSUE in a tracker (Jira/YouTrack/GitHub/Linear: ID or link).** Get the issue
+text via an available integration (an MCP tool, if connected; otherwise ask the
+user for the text — do not make it up). Find the related commits
+(`git log --all --grep=<ID> --oneline`, then `git show --stat`), and build the
+list of affected screens/components.
+
+If the scope cannot be determined unambiguously — stop and check with the task
+author; do not check the whole frontend at random. Record the final SCOPE (screens,
+URLs, files, components) at the start of the report.
+
+## KEY PRINCIPLE: CHECK IT LIVE, NOT FROM THE CODE
+
+An attribute being present in the markup ≠ accessibility in practice. Check
+adversarially:
+
+1. `aria-label` is present in the JSX — but verify that the screen reader actually
+   announces it and that it does not duplicate/conflict with the visible text
+   ("button button", a double announcement).
+2. `alt` is set — but verify it is meaningful (not `alt="image"`, not
+   `alt="1.jpg"`), and that decorative images have `alt=""` (empty) rather than
+   missing it.
+3. Contrast "looks fine" — measure the actual computed colors (getComputedStyle /
+   an eyedropper), including hover/focus/disabled states and text over a background
+   image/gradient.
+4. "Focus is visible" — check it on EVERY interactive element while tabbing, not on
+   one. A common hole is a global `outline: none` with no replacement.
+5. "The modal is accessible" — check the whole cycle: focus moved inside on open,
+   is trapped inside (focus trap), Esc closes it, focus returned to the trigger.
+6. Do not trust the result of a single automated scanner: axe/Lighthouse catch
+   ~30–40% of WCAG issues; the rest require a manual run only (logical focus order,
+   meaningful alt, correct live-region behavior). State the status explicitly:
+   "does not conform" / "formally conforms (attribute present, no effect)" /
+   "conforms".
+
+## METHODOLOGY: THREE INDEPENDENT PASSES (within the SCOPE)
+
+### PASS 1 — Automated scanning
+Run the available automated scanners over the URLs/pages from the SCOPE (use the
+ones already present in the project or installed the standard way):
+- **axe-core** (via `@axe-core/cli`, the axe DevTools extension, or by injecting
+  axe into the running page through the browser tool and calling `axe.run()`);
+- **Lighthouse** Accessibility section
+  (`lighthouse <url> --only-categories=accessibility`);
+- **pa11y** (`pa11y <url>`), **WAVE** — if available.
+An automated scanner gives a starting list, not a final one. Confirm each of its
+findings manually (PASS 2), and filter out false positives.
+
+### PASS 2 — Manual line-by-line code review
+Go through the SCOPE files line by line, applying the POUR checklist below. For
+each potential problem, record file:line and the WCAG criterion, then verify it in
+PASS 3.
+
+### PASS 3 — LIVE run in the browser (mandatory)
+Actually bring up the app and check it in the browser via the Claude Browser MCP.
+- Bring up the project dev server (`npm run dev` / `pnpm dev` / the standard command
+  from the README/package.json) and open the needed URL, or use an already-running
+  environment/staging if one is specified.
+- **Keyboard**: go through the entire screen using only Tab/Shift+Tab/Enter/Space/
+  arrows. Check: all interactive elements are reachable, the order is logical, there
+  is no keyboard trap, a visible focus indicator is present at every step, and
+  custom widgets (dropdown/tabs/slider/datepicker) are keyboard-operable following
+  the expected pattern (WAI-ARIA Authoring Practices).
+- **Focus in modals/popovers**: open → focus moves inside, trap, Esc, return.
+- **Contrast**: measure the computed colors of key text and UI controls (via
+  `getComputedStyle` in the browser console or a zoom screenshot + calculation),
+  including states.
+- **Screen reader / accessibility tree**: capture the page's accessibility tree
+  (`read_page` gives element roles/names — essentially what a screen reader
+  "hears") and verify that every control has a correct role + accessible name, that
+  headings form a hierarchy, and that landmarks are present. Where possible, run a
+  real screen reader (NVDA/Voiceover/Orca).
+- **Zoom/reflow**: 200% zoom and a narrow viewport (emulate resize down to ~320px)
+  — content is not clipped, no horizontal scroll appears, nothing overlaps (WCAG
+  1.4.10, 1.4.4).
+- **prefers-reduced-motion**: turn on the emulation and verify that animations/
+  autoplay respect the setting (WCAG 2.3.3).
+Record what was actually verified live and what was not (no real screen reader, a
+headless environment, etc.) — in the "what was not checked" section.
+
+## CHECKLIST BY POUR PRINCIPLE (apply the blocks relevant to the SCOPE)
+
+### P — Perceivable
+1. **Text alternatives (1.1.1)**: every informative `<img>`/icon/`<svg>`/canvas/
+   graphic has a meaningful `alt`/`aria-label`; decorative ones have
+   `alt=""`/`aria-hidden="true"`. An icon button with no text has an accessible
+   name.
+2. **Text contrast (1.4.3, AA)**: normal text ≥ 4.5:1, large text (≥18pt or ≥14pt
+   bold) ≥ 3:1. **Measure**, don't eyeball. Check placeholder, disabled states,
+   text over a gradient/image.
+3. **Non-text contrast (1.4.11, AA)**: input borders, control icons, the focus
+   indicator, states — ≥ 3:1 against the adjacent color.
+4. **Color is not the only carrier of meaning (1.4.1)**: an error/status/link is
+   distinguishable by more than color (icon, underline, text).
+5. **Reflow (1.4.10) and text resizing (1.4.4)**: content works at 200% and at
+   320px with no loss of information and no horizontal scroll.
+6. **Media**: video has captions (1.2.2), audio has a transcript; no audio autoplay
+   longer than 3s without a control (1.4.2).
+
+### O — Operable
+7. **Keyboard accessibility (2.1.1)**: all functionality is reachable from the
+   keyboard; custom interactive elements have `tabindex="0"` and key handlers, not
+   just an `onClick` on a `<div>`.
+8. **No keyboard trap (2.1.2)**: you can leave any element via the keyboard.
+9. **Visible focus (2.4.7, AA)**: a focus indicator is present and has contrast;
+   no `outline:none` without an adequate replacement.
+10. **Focus order (2.4.3)**: matches the visual/logical order; no positive
+    `tabindex` > 0 breaking the order.
+11. **Skip link / bypass blocks (2.4.1)**: there is a way to skip repeated
+    navigation on pages with a large menu.
+12. **Page title and link purpose (2.4.2, 2.4.4)**: `<title>` is meaningful; link
+    text makes sense out of context (not "read more" × 10 identical ones).
+13. **Touch targets (2.5.8 AA in 2.2 / 2.5.5)**: interactive targets are large
+    enough (rule of thumb ≥ 24×24 CSS px, better 44×44) and not crammed against
+    each other.
+14. **Timing (2.2.1)**: if there are timeouts/auto-logout — they can be
+    extended/turned off. Auto-updating content can be paused (2.2.2).
+15. **Animation/flashing (2.3.1, 2.3.3)**: no flashing > 3 times/s; motion respects
+    `prefers-reduced-motion`.
+
+### U — Understandable
+16. **Page language (3.1.1)**: `<html lang="...">` is set and correct; blocks in
+    another language are marked with `lang`.
+17. **Forms — labels (3.3.2, 1.3.1, 4.1.2)**: every field has a programmatically
+    associated `<label for>`/`aria-labelledby` (not just a placeholder);
+    required-ness and format are announced by more than color/an asterisk.
+18. **Form errors (3.3.1, 3.3.3)**: the error is identified by text, associated
+    with the field (`aria-describedby`), announced to the screen reader, and has a
+    hint on how to fix it.
+19. **Predictability (3.2.1, 3.2.2)**: focus / changing a field's value does not
+    cause unexpected navigation/submit without a warning.
+20. **Consistency (3.2.3, 3.2.4)**: identical elements are named/positioned the
+    same way across screens.
+
+### R — Robust
+21. **Valid/semantic HTML (4.1.1, 1.3.1)**: native elements are used
+    (`<button>`, `<a>`, `<nav>`, `<main>`, `<ul>`) instead of `<div>`s with roles
+    where native solves it; no duplicate `id`s.
+22. **ARIA is correct (4.1.2)**: roles/states/properties are valid and in sync with
+    the visual state (`aria-expanded`, `aria-checked`, `aria-selected`,
+    `aria-disabled`); no `role` contradicting the tag; ARIA is not layered "on top
+    of" an accessible native element (the first rule of ARIA — don't use ARIA if a
+    native element exists).
+23. **Landmarks and heading hierarchy (1.3.1)**: a single `<h1>`, headings with no
+    skipped levels, content laid out into landmark roles
+    (banner/nav/main/contentinfo).
+24. **Dynamic notifications (4.1.3, AA)**: toasts/validation/loading/counters are
+    announced via `aria-live`/`role="status"`/`role="alert"` with the correct
+    politeness (polite/assertive).
+
+## EDGE CASES THAT ARE OFTEN MISSED
+- A custom dropdown/autocomplete on a `<div>`: works with the mouse, but not with
+  the keyboard or screen reader (no `listbox`/`option` roles, no arrow-key control).
+- A modal renders, but focus stays on the background; the background is not marked
+  `aria-hidden`/`inert`, and the screen reader "falls through" behind the modal.
+- An icon button (hamburger, close, gear) with no accessible name — the screen
+  reader reads "button" with no meaning.
+- A placeholder used instead of a `<label>` — it disappears on input, is not read
+  as a label, and often fails contrast.
+- A toast/success message appears visually, but without `aria-live` — a blind user
+  never learns the action succeeded.
+- `outline: none` in global styles / a CSS reset with no replacement — focus is
+  invisible across the entire app.
+- Validation errors highlighted only with a red border — inaccessible for color
+  blindness and for the screen reader.
+- A focus indicator is present, but the indicator's own contrast is < 3:1 (gray on
+  white).
+- A skeleton/loading state with no `aria-busy`/live-region — the screen reader is
+  silent during loading.
+- A data table on a `<div>` grid with no `table/row/cell` roles — row/column
+  navigation is lost.
+- DOM order does not match the visual order because of CSS (`order`,
+  `flex-direction: row-reverse`) — the focus order is illogical.
+- Touch targets smaller than 24px or right next to each other (action icons in a
+  table row).
+- Content available only on hover (tooltip, submenu) is unreachable from the
+  keyboard and on touch devices (WCAG 1.4.13).
+- `aria-label` on an element that already has visible text — it overrides and
+  desyncs what is seen versus what is heard.
+
+## SEVERITY SCALE
+For each finding, state the WCAG success criterion (number + level A/AA) and the
+affected user group (blind / low-vision / color-blind / motor / cognitive / deaf).
+- **Critical** — fully blocks task completion for a user group (e.g. placing an
+  order is impossible from the keyboard; a form cannot be filled out with a screen
+  reader). Usually a level-A violation.
+- **High** — seriously impedes it, a workaround exists only at great effort, or an
+  AA-criterion violation on a key path (low contrast of the main text, invisible
+  focus).
+- **Medium** — a noticeable barrier on a secondary path or for part of the
+  scenarios (suboptimal focus order, missing skip link).
+- **Low** — a best-practice violation with no direct blocking (redundant ARIA,
+  imperfect alt on a secondary image).
+
+Overall verdict by level: conforms to WCAG 2.2 AA / conforms to A but not AA / does
+not conform (list the blockers).
+
+## REPORT FORMAT
+1. **Executive summary** (no jargon): can a person with a disability use this
+   screen, what blocks them, what legal/ethical risks exist (accessibility is often
+   regulated — EN 301 549, ADA, GOST R 52872), what to fix first.
+2. **SCOPE** — the screens/URLs/files/components checked and what was left out of
+   scope and why.
+3. **One-line verdict** up front: "conforms to WCAG 2.2 AA" / "does not conform —
+   N critical/high barriers" / "conforms with caveats".
+4. **Coverage matrix** — what was checked by an automated scanner, what manually
+   from the code, what by a live run (keyboard/focus/contrast/screen reader/zoom/
+   motion).
+5. **List of findings**: ID, file:line (and/or URL+selector), WCAG criterion
+   (number+level), affected group, scenario ("while tabbing, focus is not visible
+   on button X"), severity, recommendation.
+6. **What was done well** — strong a11y patterns worth replicating.
+7. **Action plan**: blockers (critical/high before release) vs. deferred
+   (medium/low with a ticket).
+8. **What was not checked** — limitations (no real screen reader, headless, could
+   not bring up the app, not all states were tested) — honestly, so that an absence
+   of findings does not read as "everything is accessible".
+
+## RULES FOR WRITING UP FINDINGS
+Before you start, check whether a report for this scope already exists in
+`docs/qa/accessibility/` — if so, continue the ID numbering and update the statuses
+of known findings rather than recreating it.
+For each finding, the following are mandatory:
+- A stable ID: `A11Y-<scope-slug>-001`.
+- file:line (and/or the page URL + CSS selector/element text).
+- WCAG success criterion: number and level (e.g. "2.1.1 Keyboard (A)", "1.4.3
+  Contrast (Minimum) (AA)").
+- The affected user group and the way of interacting.
+- A concrete scenario: "after doing X, user Y cannot Z" — not in the abstract.
+- Severity with justification (blocks / impedes / cosmetic).
+- A concrete recommendation ("add `<label for="email">`", "replace `<div onClick>`
+  with `<button>`", "raise the contrast of #999 text on #fff to ≥4.5:1").
+Save the report to `docs/qa/accessibility/<scope-slug>.md` (check the existing
+repository structure; `docs/qa/...` is the default if there is no own convention).
+
+## RUNNING IT (practical instructions)
+1. Determine the SCOPE YOURSELF in the main thread (see "Input") — do not delegate
+   this step; a subagent does not see the conversation context. Detect the frontend
+   stack and how to bring up the app; work out the URLs of the screens under review.
+2. Check whether a previous report exists in `docs/qa/accessibility/`.
+3. Bring up the app (or use the specified environment) and open the needed URLs in
+   the browser via the Claude Browser MCP — a live run is mandatory; without it the
+   report is incomplete.
+4. Run PASS 1 (automated scanners axe/Lighthouse/pa11y over the URLs) — collect the
+   starting list.
+5. Carry out PASS 2 (line-by-line code review by POUR) and PASS 3 (live run:
+   keyboard, focus, contrast, accessibility tree, 200% zoom, motion). If there are
+   many screens and the Agent tool is available — split it across subagents by
+   screen/zone; give each one the concrete URLs/paths, the POUR checklist, the
+   severity scale, and the finding format (the subagent does not see this file).
+   Write confirmed findings into an interim file as you go.
+6. Merge the three passes into the report, filter out the scanner's false
+   positives, but record both the automated finding and its manual confirmation if
+   they are different facts. Save the file to
+   `docs/qa/accessibility/<scope-slug>.md`.
+7. Explicitly list what was not checked.
+
+This is testing, not implementation: fixes to markup/styles are made by the
+developer based on the report, not by you within this skill.
