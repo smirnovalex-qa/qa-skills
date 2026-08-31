@@ -1,9 +1,11 @@
-# QA Skills for Claude Code
+# QA Skills for Claude Code, Codex & Cursor
 
-A curated set of production-grade **QA skills** for [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) — bug reporting, bug-fix and feature review, and security & performance audits. Packaged as a Claude Code **plugin marketplace** so a team can install the whole toolkit with a single command and keep it up to date via `git pull`.
+A curated set of production-grade **QA skills** — requirements and test design, test automation, non-functional checks, defect management, and security & performance audits. Authored as [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) skills and shipped with ready-to-use adapters for [OpenAI Codex](https://developers.openai.com/codex/cli) and [Cursor](https://docs.cursor.com/), so a whole team can install the same QA discipline into whichever agentic coding tool they use — and keep it up to date via `git pull`.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin%20Marketplace-8A2BE2.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
+[![Codex](https://img.shields.io/badge/OpenAI%20Codex-Custom%20Prompts-412991.svg)](https://developers.openai.com/codex/cli)
+[![Cursor](https://img.shields.io/badge/Cursor-Project%20Rules-000000.svg)](https://docs.cursor.com/context/rules)
 [![Skills](https://img.shields.io/badge/Skills-29-success.svg)](#skills)
 [![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen.svg)](#)
 
@@ -14,6 +16,9 @@ A curated set of production-grade **QA skills** for [Claude Code](https://docs.c
 - [Overview](#overview)
 - [Skills](#skills)
 - [Installation](#installation)
+  - [Claude Code](#claude-code)
+  - [Cursor](#cursor)
+  - [Codex](#codex)
 - [Usage](#usage)
 - [Repository Structure](#repository-structure)
 - [Compatibility & Assumptions](#compatibility--assumptions)
@@ -24,11 +29,21 @@ A curated set of production-grade **QA skills** for [Claude Code](https://docs.c
 
 ## Overview
 
-Each skill is a self-contained, model-invoked workflow that Claude Code loads on demand when the task matches — you don't have to remember command names. The skills encode a consistent QA discipline:
+Each skill is a self-contained, model-invoked QA workflow — you describe the task in plain language and the agent runs the matching skill; you don't have to remember command names. The skills encode a consistent QA discipline:
 
 - **Evidence over assertion** — findings are tied to `file:line`, reproduction steps, or measurements (`EXPLAIN ANALYZE`, `py-spy`, bundle size, `k6`), not opinions.
 - **Adversarial verification** — reports and fixes are challenged before they are trusted, to filter out plausible-but-wrong conclusions.
 - **Explicit verdicts** — every audit ends with a clear production-readiness call, not a wall of caveats.
+
+### One source, three tools
+
+The skills are authored once, as [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) `SKILL.md` files under [`plugins/qa-skills/skills/`](plugins/qa-skills/skills). From that single canonical source, [`scripts/generate-adapters.mjs`](scripts/generate-adapters.mjs) produces drop-in adapters for the other tools under [`dist/`](dist) — so the trigger text and the workflow are identical everywhere, and you never maintain three copies by hand.
+
+| Tool | Format | How the workflow is reached |
+| --- | --- | --- |
+| **Claude Code** | Plugin skills — [`plugins/qa-skills/skills/*/SKILL.md`](plugins/qa-skills/skills) (the source) | Auto-invoked: the agent loads a skill on its own when your request matches its `description`. |
+| **Cursor** | Project rules — [`dist/cursor/rules/*.mdc`](dist/cursor/rules) | Auto-attached (*Agent Requested*): Cursor's agent pulls a rule in when the task matches its `description`. Also attachable by hand with `@rule-name`. |
+| **Codex** | Custom prompts — [`dist/codex/prompts/*.md`](dist/codex/prompts) | Invoked by name as `/skill-name`. Codex has no description-based auto-trigger, so an [`AGENTS.md` snippet](dist/codex/AGENTS.snippet.md) gives the agent a catalog of when to reach for each. |
 
 > **Language note:** skill instructions are authored in **Russian**. The skills themselves are stack- and workflow-oriented and can be adapted to any project.
 
@@ -107,9 +122,17 @@ project's stack, test framework, and issue tracker, then adapts.
 
 ## Installation
 
-Requires Claude Code with plugin support.
+Pick your tool below. The Cursor and Codex adapters live under [`dist/`](dist);
+clone this repository first so you can copy them:
 
-Add this repository as a plugin marketplace, then install the plugin:
+```bash
+git clone https://github.com/smirnovalex-qa/qa-skills.git
+```
+
+### Claude Code
+
+Requires Claude Code with plugin support. Add this repository as a plugin
+marketplace, then install the plugin — no cloning or copying needed:
 
 ```bash
 /plugin marketplace add https://github.com/smirnovalex-qa/qa-skills.git
@@ -122,13 +145,88 @@ To pin a local checkout instead of the remote (e.g. for development):
 /plugin marketplace add /path/to/qa-skills
 ```
 
-After installation the skills are available automatically. If you previously kept
-copies under `~/.claude/skills/`, remove them to avoid duplicates.
+After installation the skills are available automatically — the agent invokes the
+matching one when your request fits its trigger. If you previously kept copies
+under `~/.claude/skills/`, remove them to avoid duplicates.
+
+### Cursor
+
+Cursor consumes the skills as **project rules** — one `.mdc` file per skill,
+scoped to the repository you drop them into. Each rule is *Agent Requested*
+(`alwaysApply: false` with a `description`), so Cursor's agent loads it on its own
+when the task matches; you can also attach one by hand with `@rule-name` in chat.
+Because they are committed to the project, the whole team gets them via `git pull`.
+
+Copy the rules into the **target project** (not this repo):
+
+```bash
+# macOS / Linux — from the cloned qa-skills directory
+mkdir -p /path/to/your-project/.cursor/rules
+cp dist/cursor/rules/*.mdc /path/to/your-project/.cursor/rules/
+```
+
+```powershell
+# Windows PowerShell — from the cloned qa-skills directory
+New-Item -ItemType Directory -Force C:\path\to\your-project\.cursor\rules | Out-Null
+Copy-Item dist\cursor\rules\*.mdc C:\path\to\your-project\.cursor\rules\
+```
+
+Reload Cursor (or reopen the project) and the rules appear under
+**Settings → Rules**. Verify with a prompt like *"design test cases for this
+form"* — Cursor should attach `test-case-design` automatically.
+
+### Codex
+
+Codex consumes the skills as **custom prompts** — one `.md` file per skill,
+invoked by name as `/skill-name`. Prompts are user-scoped, so they apply across
+all your projects. Skill bodies already use `$ARGUMENTS`, which Codex substitutes
+with whatever you pass after the command.
+
+Copy the prompts into your Codex prompts directory:
+
+```bash
+# macOS / Linux
+mkdir -p ~/.codex/prompts
+cp dist/codex/prompts/*.md ~/.codex/prompts/
+```
+
+```powershell
+# Windows PowerShell
+New-Item -ItemType Directory -Force $HOME\.codex\prompts | Out-Null
+Copy-Item dist\codex\prompts\*.md $HOME\.codex\prompts\
+```
+
+Then invoke a workflow by name, passing the scope as the argument:
+
+```
+/feature-review src/checkout            # review a feature/branch
+/bug-report-write кнопка «оплатить» не реагирует на клик
+/security-audit-feature MM-1234         # audit a scope by issue id
+```
+
+Codex won't pick a prompt automatically, so append the contents of
+[`dist/codex/AGENTS.snippet.md`](dist/codex/AGENTS.snippet.md) — a table of
+*"which `/command` to use when"* — to your project's `AGENTS.md` (or
+`~/.codex/AGENTS.md`). That lets the agent suggest the right workflow itself,
+recovering most of Claude Code's description-based routing.
+
+### Regenerating the adapters
+
+The files under [`dist/`](dist) are committed and usable as-is. After you edit a
+skill's `SKILL.md`, regenerate them from the canonical source:
+
+```bash
+node scripts/generate-adapters.mjs .
+```
+
+See [`dist/README.md`](dist/README.md) for argument-passing details and notes on
+what each adapter preserves or approximates.
 
 ## Usage
 
-Skills are invoked automatically by Claude Code when your request matches a skill's
-trigger — for example:
+In **Claude Code** and **Cursor** the right skill is selected automatically when
+your request matches its trigger; in **Codex** you call it by name (`/skill-name`).
+Either way, the phrasing that triggers each workflow is the same — for example:
 
 - *"Are these requirements testable, or are there gaps?"* → `requirements-review`
 - *"Draft a test plan for this feature."* → `test-plan`
@@ -146,10 +244,10 @@ trigger — for example:
 - *"Why is this service eating so much CPU at scale?"* → `performance-audit-full`
 - *"Can we ship this release?"* → `release-readiness`
 
-The [Skills](#skills) table above lists all 29 with their trigger scope.
-
-You can also invoke a skill explicitly by name if your Claude Code build exposes it
-as a command.
+The [Skills](#skills) table above lists all 29 with their trigger scope. Every
+skill name doubles as its explicit invocation — `/feature-review` in Codex, the
+skill/command name in Claude Code, or `@feature-review` in Cursor — for when you
+want to force a specific workflow instead of relying on auto-selection.
 
 ## Repository Structure
 
@@ -191,6 +289,13 @@ qa-skills/
 │           ├── smoke-suite/SKILL.md
 │           ├── test-summary-report/SKILL.md
 │           └── ci-qa-gate/SKILL.md
+├── dist/                                  # Generated adapters for other tools
+│   ├── cursor/rules/*.mdc                 #   Cursor project rules (Agent Requested)
+│   └── codex/                             #   Codex custom prompts + AGENTS.md snippet
+│       ├── prompts/*.md
+│       └── AGENTS.snippet.md
+├── scripts/
+│   └── generate-adapters.mjs             # Regenerates dist/ from the SKILL.md sources
 ├── LICENSE
 └── README.md
 ```
@@ -234,7 +339,10 @@ Claude Code plugin update flow.
    to decide when to trigger the skill.
 3. Do not commit project-, host-, or company-specific identifiers, secrets, or PII.
    Use neutral placeholders (see [Compatibility & Assumptions](#compatibility--assumptions)).
-4. Bump the plugin `version` on any change to skill behavior.
+4. Edit only the canonical `SKILL.md` sources, then regenerate the Cursor/Codex
+   adapters with `node scripts/generate-adapters.mjs .` and commit the updated
+   `dist/` — never hand-edit files under `dist/`.
+5. Bump the plugin `version` on any change to skill behavior.
 
 ## Security & Privacy
 
