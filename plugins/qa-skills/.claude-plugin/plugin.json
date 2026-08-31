@@ -1,0 +1,6 @@
+{
+  "name": "qa-skills",
+  "description": "End-to-end QA toolkit: requirements review, test planning & design, test-data generation, E2E/API/unit test authoring, flaky-test triage, accessibility/i18n/cross-browser checks, bug reporting & triage, RCA, defect metrics, security & performance audits, release readiness, and CI quality gates.",
+  "version": "0.2.0",
+  "author": { "name": "smirnovalex-qa" }
+}

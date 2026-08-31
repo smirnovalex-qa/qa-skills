@@ -1,0 +1,11 @@
+{
+  "name": "qa-skills",
+  "owner": { "name": "smirnovalex-qa" },
+  "plugins": [
+    {
+      "name": "qa-skills",
+      "source": "./plugins/qa-skills",
+      "description": "Full QA lifecycle skills: planning & test design, test automation authoring, non-functional checks, defect management, security & performance audits, release readiness & CI gates"
+    }
+  ]
+}
